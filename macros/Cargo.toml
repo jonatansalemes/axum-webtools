@@ -1,0 +1,23 @@
+[package]
+name = "axum-webtools-macros"
+version = "0.1.8"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Jonatan Lemes"]
+description = "General purpose macros for axum web framework."
+repository = "https://github.com/jonatansalemes/axum-webtools.git"
+homepage = "https://github.com/jonatansalemes/axum-webtools.git"
+documentation = "https://docs.rs/axum-webtools-macros"
+readme = "../README.md"
+keywords = ["axum", "web", "test", "dotenv"]
+categories = ["web-programming"]
+
+[dependencies]
+axum-webtools = "0.1.8"
+dotenv = { version = "0.15.0" }
+quote = { version = "1.0.37" }
+syn = { version = "2.0.85" }
+tokio = { version = "1.41.0", features = ["full"] }
+
+[lib]
+proc-macro = true
