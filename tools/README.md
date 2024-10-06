@@ -1,0 +1,116 @@
+# Axum Web Tools
+
+General purpose tools for axum web framework.
+
+## Usage example with some features
+
+* `with_tx` function to run SQLX transactions in Axum web framework.
+* `Claims` struct to extract authenticated user from JWT token.
+* `HttpError` struct to return error responses.
+* `ok` function to return successful responses.
+
+```rust
+
+use axum::extract::State;
+use axum::response::Response;
+use axum::routing::{get, post};
+use axum::Router;
+use axum_webtools::db::sqlx::with_tx;
+use axum_webtools::http::response::{ok, HttpError};
+use axum_webtools::security::jwt::Claims;
+use log::info;
+use scoped_futures::ScopedFutureExt;
+use serde::Serialize;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
+use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
+
+pub type Tx<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
+
+#[derive(Debug, Serialize)]
+struct CreateNewUserResponse {
+    id: i32,
+    email: String,
+}
+
+struct User {
+    id: i32,
+    email: String,
+    password: String,
+}
+
+async fn create_new_user<'a>(email: &str, password: &str, transaction: &mut Tx<'a>) -> sqlx::Result<User> {
+    let user = sqlx::query_as!(
+        User,
+        r#"
+        INSERT INTO users (email, password)
+        VALUES ($1, $2)
+        RETURNING *
+        "#,
+        email,
+        password
+    )
+        .fetch_one(&mut **transaction)
+        .await?;
+    Ok(user)
+}
+
+async fn create_new_user_handler(
+    State(pool): State<PgPool>,
+) -> Result<Response, HttpError> {
+    // with_tx is a helper function that wraps the transaction logic
+    // if the closure returns an error, the transaction will be rolled back
+    with_tx(&pool, |tx| async move {
+        let user = create_new_user("someemail", "somepassword", tx).await?;
+        ok(CreateNewUserResponse {
+            id: user.id,
+            email: user.email,
+        })
+    }.scope_boxed())
+        .await
+}
+
+async fn authenticated_handler(
+    //inject claims into handler to require and get the authenticated user
+    claims: Claims,
+) -> Result<Response, HttpError> {
+    let subject = claims.sub;
+    info!("Authenticated user: {}", subject);
+    ok(())
+}
+
+
+#[tokio::main]
+async fn main() -> Result<(), std::io::Error> {
+
+    //jwt integration needs these environment variables
+    std::env::set_var("JWT_SECRET", "yoursecret");
+    std::env::set_var("JWT_ISSUER", "yourissuer");
+    std::env::set_var("JWT_AUDIENCE", "youraudience");
+
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect("postgres://username:password@pgsql:5432/dbname")
+        .await
+        .expect("Failed to create pool");
+
+    let router = Router::new()
+        .route(
+            "/api/v1/users",
+            post(create_new_user_handler),
+        )
+        .route(
+            "/api/v1/authenticated",
+            get(authenticated_handler),
+        )
+        .with_state(pool);
+
+    let ip_addr = IpAddr::from_str("0.0.0.0").unwrap();
+    let addr = SocketAddr::from((ip_addr, 8080));
+    axum_server::bind(addr)
+        .serve(router.into_make_service())
+        .await
+}
+
+```
