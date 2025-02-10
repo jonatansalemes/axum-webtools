@@ -1,7 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use derive_more::Display;
+use derive_more::with_trait::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt;
