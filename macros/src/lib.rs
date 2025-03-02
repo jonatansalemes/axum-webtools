@@ -13,7 +13,14 @@ pub fn unit_test(_: TokenStream, item: TokenStream) -> TokenStream {
         #[tokio::test]
         async fn #name() {
             dotenv::dotenv().ok();
-            env_logger::init();
+            match env_logger::try_init() {
+                Ok(_) => {
+                    info!("Logger initialized");
+                }
+                Err(_) => {
+                    warn!("Logger already initialized");
+                }
+            }
             #block
         }
     };

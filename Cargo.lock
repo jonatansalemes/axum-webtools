@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "argon2",
  "axum",
@@ -222,9 +222,9 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89bd15b5a02288a0ec3bf08e74261db51e9fa6da7312a6dd8aa7aa05d88f24ab"
+checksum = "c4875f36393a832e8c767e76db0877ebdc7ff124cbe30d9a433f943163a120fa"
 dependencies = [
  "argon2",
  "axum",
@@ -243,9 +243,9 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools-macros"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
- "axum-webtools 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)",
+ "axum-webtools 0.1.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "dotenv",
  "env_logger",
  "quote",
