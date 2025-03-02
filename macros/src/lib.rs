@@ -13,6 +13,7 @@ pub fn unit_test(_: TokenStream, item: TokenStream) -> TokenStream {
         #[tokio::test]
         async fn #name() {
             dotenv::dotenv().ok();
+            env_logger::init();
             #block
         }
     };
