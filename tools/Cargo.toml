@@ -28,5 +28,5 @@ thiserror = { version = "2.0.11" }
 validator = { version = "0.20.0" }
 
 [dev-dependencies]
-fake = { version = "3.1.0" }
+fake = { version = "4.0.0" }
 

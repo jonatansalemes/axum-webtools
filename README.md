@@ -8,7 +8,6 @@ General purpose tools for axum web framework.
 * `Claims` struct to extract authenticated user from JWT token.
 * `HttpError` struct to return error responses.
 * `ok` function to return successful responses.
-* `endpoint` macro to inject dependencies into handlers.
 
 ```toml
 
@@ -82,17 +81,6 @@ async fn create_new_user_handler(
         .await
 }
 
-#[endpoint(transactional)]
-//implicitly inject State(pool): State<PgPool> into the handler
-//and wrap the handler with with_tx and inject tx: &mut Tx<'a> into the handler
-async fn create_new_user_with_macro_handler() -> Result<Response, HttpError> {
-    let user = create_new_user("someemail", "somepassword", tx).await?;
-    ok(CreateNewUserResponse {
-        id: user.id,
-        email: user.email,
-    })
-}
-
 async fn authenticated_handler(
     //inject claims into handler to require and get the authenticated user
     claims: Claims,
@@ -101,26 +89,6 @@ async fn authenticated_handler(
     info!("Authenticated user: {}", subject);
     ok(())
 }
-
-#[endpoint(private)]
-//implicitly claims: Claims into the handler
-async fn authenticated_with_macro_handler() -> Result<Response, HttpError> {
-    let subject = claims.sub;
-    info!("Authenticated user: {}", subject);
-    ok(())
-}
-
-#[endpoint(transactional,private)]
-//you can also combine multiple macros
-async fn authenticated_with_macro_handler() -> Result<Response, HttpError> {
-    let subject = claims.sub;
-    // tx: &mut Tx<'a> to run transactions
-    // claims:Claims is injected into the handler
-    // pool is also injected into the handler
-    info!("Authenticated user: {}", subject);
-    ok(())
-}
-
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
