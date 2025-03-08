@@ -125,3 +125,4 @@ macro_rules! http_response {
 }
 
 http_response!(ok, StatusCode::OK);
+http_response!(created, StatusCode::CREATED);
