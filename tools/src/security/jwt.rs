@@ -85,6 +85,7 @@ impl Display for Claims {
     }
 }
 
+#[cfg(not(test))]
 impl<S> FromRequestParts<S> for Claims
 where
     S: Send + Sync,
@@ -100,6 +101,61 @@ where
         let claims = parse_jwt_token(bearer.token()).map_err(|_| AuthError::InvalidToken)?;
 
         Ok(claims)
+    }
+}
+
+#[cfg(test)]
+impl<S> FromRequestParts<S> for Claims
+where
+    S: Send + Sync,
+{
+    type Rejection = AuthError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let sub = parts
+            .headers
+            .get("X-Claims-Subject")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let iss = parts
+            .headers
+            .get("X-Claims-Issuer")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let aud = parts
+            .headers
+            .get("X-Claims-Audience")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let issued_at = parts
+            .headers
+            .get("X-Claims-Issued-At")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let exp = parts
+            .headers
+            .get("X-Claims-Expiration")
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        let sub = sub.to_string();
+        let iss = iss.to_string();
+        let aud = aud.to_string();
+        let issued_at = issued_at.parse().unwrap();
+        let exp = exp.parse().unwrap();
+
+        Ok(Claims {
+            sub,
+            aud,
+            iss,
+            issued_at,
+            exp,
+        })
     }
 }
 

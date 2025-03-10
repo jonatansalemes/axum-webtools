@@ -1,6 +1,6 @@
 [package]
 name = "axum-webtools-macros"
-version = "0.1.20"
+version = "0.1.22"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Jonatan Lemes"]
@@ -13,7 +13,7 @@ keywords = ["axum", "web", "test", "dotenv"]
 categories = ["web-programming"]
 
 [dependencies]
-axum-webtools = "0.1.20"
+axum-webtools = "0.1.22"
 dotenv = { version = "0.15.0" }
 env_logger = { version = "0.11.6" }
 quote = { version = "1.0.38" }
