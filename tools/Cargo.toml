@@ -1,6 +1,6 @@
 [package]
 name = "axum-webtools"
-version = "0.1.23"
+version = "0.1.24"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Jonatan Lemes"]
@@ -36,6 +36,5 @@ tokio = { version = "1.44.0", features = ["full"] }
 
 
 [features]
-jwt = []
-default = ["jwt"]
+mock_jwt = []
 
