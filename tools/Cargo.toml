@@ -1,6 +1,6 @@
 [package]
 name = "axum-webtools"
-version = "0.1.22"
+version = "0.1.23"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Jonatan Lemes"]
@@ -32,6 +32,10 @@ validator = { version = "0.20.0", features = ["derive"] }
 
 [dev-dependencies]
 fake = { version = "4.0.0" }
-
 tokio = { version = "1.44.0", features = ["full"] }
+
+
+[features]
+jwt = []
+default = ["jwt"]
 

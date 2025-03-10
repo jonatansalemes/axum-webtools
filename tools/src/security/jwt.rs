@@ -85,7 +85,7 @@ impl Display for Claims {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "jwt")))]
 impl<S> FromRequestParts<S> for Claims
 where
     S: Send + Sync,
@@ -104,7 +104,7 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "jwt"))]
 impl<S> FromRequestParts<S> for Claims
 where
     S: Send + Sync,
