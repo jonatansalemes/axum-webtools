@@ -71,22 +71,31 @@ impl Display for HttpErrorDetails {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
-        let (status_code, message) = match self {
-            Self::SqlxError(sqlx_error) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("{:?}", sqlx_error),
+        let (status_code, body) = match self {
+            Self::SqlxError(sqlx_error) => {
+                let message = format!("{:?}", sqlx_error);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({
+                        "message": message
+                    }),
+                )
+            }
+            Self::WithDetails(details) => (
+                details.status_code,
+                json!({
+                    "message": details.message
+                }),
             ),
-            Self::WithDetails(details) => (details.status_code, details.message),
-            Self::ValidationError(validation_error_response) => (
-                StatusCode::BAD_REQUEST,
-                format!("{:?}", validation_error_response),
-            ),
+            Self::ValidationError(validation_error_response) => {
+                let json_value = json!({
+                    "errors": validation_error_response.validation_errors
+                });
+                (StatusCode::BAD_REQUEST, json_value)
+            }
         };
 
-        let body = Json(json!({
-            "message": message
-        }));
-        (status_code, body).into_response()
+        (status_code, Json(body)).into_response()
     }
 }
 
@@ -126,3 +135,39 @@ macro_rules! http_response {
 
 http_response!(ok, StatusCode::OK);
 http_response!(created, StatusCode::CREATED);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use validator::Validate;
+
+    #[derive(Debug, Validate)]
+    struct Test {
+        #[validate(length(min = 5))]
+        name: String,
+    }
+
+    #[tokio::test]
+    async fn test_validation_error_into_response() {
+        let test = Test {
+            name: "test".to_string(),
+        };
+
+        let validation_errors = test.validate().unwrap_err();
+
+        let http_error: HttpError = validation_errors.into();
+
+        let response = http_error.into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            body,
+            "{\"errors\":[{\"code\":\"length\",\"message\":null,\"params\":{\"min\":5,\"value\":\"test\"}}]}"
+        );
+    }
+}

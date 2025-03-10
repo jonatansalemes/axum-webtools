@@ -1,6 +1,6 @@
 [package]
 name = "axum-webtools"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Jonatan Lemes"]
@@ -25,8 +25,9 @@ serde = { version = "1.0.217", features = ["derive"] }
 serde_json = { version = "1.0.138" }
 sqlx = { version = "0.8.3" }
 thiserror = { version = "2.0.11" }
-validator = { version = "0.20.0" }
+validator = { version = "0.20.0", features = ["derive"] }
 
 [dev-dependencies]
+tokio = { version = "1.43.0", features = ["full"] }
 fake = { version = "4.0.0" }
 
