@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt::Display;
 
+pub trait JwtToken: Send + Sync {
+    fn subject(&self) -> String;
+}
+
 fn get_jwt_secret() -> String {
     std::env::var("JWT_SECRET").expect("JWT_SECRET must be set")
 }
