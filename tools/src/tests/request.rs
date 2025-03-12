@@ -28,6 +28,7 @@ pub async fn request<T: Serialize, R: DeserializeOwned>(
         iss: "iss".to_string(),
         issued_at: chrono::Utc::now().timestamp() as u64,
         exp: (chrono::Utc::now() + chrono::Duration::days(7)).timestamp() as u64,
+        scopes: vec![],
     });
     let request = Request::builder()
         .header("Content-Type", "application/json")
@@ -36,6 +37,16 @@ pub async fn request<T: Serialize, R: DeserializeOwned>(
         .header("X-Claims-Issuer", claims.iss)
         .header("X-Claims-Issued-At", claims.issued_at.to_string())
         .header("X-Claims-Expiration", claims.exp.to_string())
+        .header(
+            "X-Claims-Scopes",
+            claims.scopes.iter().fold(String::new(), |acc, s| {
+                if acc.is_empty() {
+                    s.to_string()
+                } else {
+                    format!("{},{}", acc, s)
+                }
+            }),
+        )
         .uri(uri)
         .method(method)
         .body(request_body)

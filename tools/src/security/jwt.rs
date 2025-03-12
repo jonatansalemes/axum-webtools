@@ -2,16 +2,12 @@ use axum::{
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
-    Json, RequestPartsExt,
+    Json,
 };
 
 use chrono::TimeDelta;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 
-use axum_extra::{
-    headers::{authorization::Bearer, Authorization},
-    TypedHeader,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt::Display;
@@ -46,7 +42,13 @@ pub fn parse_jwt_token(token: impl Into<String>) -> Result<Claims, jsonwebtoken:
     Ok(token_data.claims)
 }
 
-pub fn create_jwt_token(subject: impl Into<String>) -> String {
+pub struct CreateJwtResult {
+    pub access_token: String,
+    pub expires_in: u64,
+    pub scopes: Vec<String>,
+}
+
+pub fn create_jwt_token(subject: impl Into<String>, scopes: Vec<String>) -> CreateJwtResult {
     let now = chrono::Utc::now();
     let expires_at = TimeDelta::try_days(7)
         .map(|d| now + d)
@@ -63,11 +65,17 @@ pub fn create_jwt_token(subject: impl Into<String>) -> String {
         issued_at,
         exp,
         aud,
+        scopes: scopes.clone(),
     };
 
     let jwt_secret = get_jwt_secret();
     let encode_key = EncodingKey::from_secret(jwt_secret.as_bytes());
-    encode(&Header::default(), &claims, &encode_key).unwrap()
+    let access_token = encode(&Header::default(), &claims, &encode_key).unwrap();
+    CreateJwtResult {
+        access_token,
+        expires_in: exp,
+        scopes,
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,6 +85,7 @@ pub struct Claims {
     pub iss: String,
     pub issued_at: u64,
     pub exp: u64,
+    pub scopes: Vec<String>,
 }
 
 impl Display for Claims {
@@ -85,6 +94,13 @@ impl Display for Claims {
     }
 }
 
+#[cfg(not(any(test, feature = "mock_jwt")))]
+use axum::RequestPartsExt;
+#[cfg(not(any(test, feature = "mock_jwt")))]
+use axum_extra::{
+    headers::{authorization::Bearer, Authorization},
+    TypedHeader,
+};
 #[cfg(not(any(test, feature = "mock_jwt")))]
 impl<S> FromRequestParts<S> for Claims
 where
@@ -142,6 +158,15 @@ where
             .unwrap()
             .to_str()
             .unwrap();
+        let scopes = parts
+            .headers
+            .get("X-Claims-Scopes")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(',')
+            .map(|s| s.to_string())
+            .collect();
 
         let sub = sub.to_string();
         let iss = iss.to_string();
@@ -155,6 +180,7 @@ where
             iss,
             issued_at,
             exp,
+            scopes,
         })
     }
 }
@@ -192,8 +218,14 @@ mod tests {
     fn test_create_token() {
         setup();
         let email: String = FreeEmail().fake();
-        let token = create_jwt_token(email.clone());
-        let claims = parse_jwt_token(token).unwrap();
+        let jwt_token = create_jwt_token(email.clone(), vec!["customers:read".to_string()]);
+        assert_eq!(jwt_token.scopes, vec!["customers:read"]);
+        let now_plus_5_days =
+            (chrono::Utc::now() + chrono::Duration::days(7)) - chrono::Duration::seconds(30);
+        assert!(jwt_token.expires_in > now_plus_5_days.timestamp() as u64);
+
+        let claims = parse_jwt_token(jwt_token.access_token).unwrap();
+        assert_eq!(vec!["customers:read".to_string()], claims.scopes);
         assert_eq!(email, claims.sub);
     }
 
@@ -201,9 +233,9 @@ mod tests {
     fn test_invalid_token() {
         setup();
         let email: String = FreeEmail().fake();
-        let mut token = create_jwt_token(email);
-        token.push_str("a");
-        let claims = parse_jwt_token(token);
+        let mut token = create_jwt_token(email, vec![]);
+        token.access_token.push_str("a");
+        let claims = parse_jwt_token(token.access_token);
         assert!(claims.is_err());
     }
 }
