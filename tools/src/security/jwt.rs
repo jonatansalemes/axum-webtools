@@ -89,7 +89,7 @@ pub struct Claims {
 }
 
 impl Claims {
-    pub fn has_scopes(&self, expected_scopes: &Vec<String>) -> bool {
+    pub fn has_scopes(&self, expected_scopes: &[String]) -> bool {
         expected_scopes
             .iter()
             .all(|scope| self.scopes.contains(&scope.to_string()))
@@ -117,6 +117,12 @@ impl RequireScopeLayer {
     pub fn with(mut self, require_scope: Vec<&str>) -> Self {
         self.required_scopes = require_scope.iter().map(|s| s.to_string()).collect();
         self
+    }
+}
+
+impl Default for RequireScopeLayer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
