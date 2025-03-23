@@ -1,16 +1,17 @@
 use axum::{
-    extract::FromRequestParts,
-    http::{request::Parts, StatusCode},
-    response::{IntoResponse, Response},
-    Json,
+    extract::Request, http::StatusCode, response::IntoResponse, response::Response, Json,
+    RequestExt,
 };
-
 use chrono::TimeDelta;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt::Display;
+use std::task::{Context, Poll};
 
 pub trait JwtToken: Send + Sync {
     fn subject(&self) -> String;
@@ -28,8 +29,7 @@ fn get_jwt_audience() -> String {
     std::env::var("JWT_AUDIENCE").expect("JWT_AUDIENCE must be set")
 }
 
-pub fn parse_jwt_token(token: impl Into<String>) -> Result<Claims, jsonwebtoken::errors::Error> {
-    let token = token.into();
+pub fn parse_jwt_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let jwt_issuer = get_jwt_issuer();
     let jwt_audience = get_jwt_audience();
     let jwt_secret = get_jwt_secret();
@@ -38,7 +38,7 @@ pub fn parse_jwt_token(token: impl Into<String>) -> Result<Claims, jsonwebtoken:
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&[jwt_audience]);
     validation.set_issuer(&[jwt_issuer]);
-    let token_data = decode::<Claims>(token.as_str(), &decode_key, &validation)?;
+    let token_data = decode::<Claims>(token, &decode_key, &validation)?;
     Ok(token_data.claims)
 }
 
@@ -88,9 +88,87 @@ pub struct Claims {
     pub scopes: Vec<String>,
 }
 
+impl Claims {
+    pub fn has_scopes(&self, expected_scopes: &Vec<String>) -> bool {
+        expected_scopes
+            .iter()
+            .all(|scope| self.scopes.contains(&scope.to_string()))
+    }
+}
+
 impl Display for Claims {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Email: {}", self.sub)
+    }
+}
+
+#[derive(Clone)]
+pub struct RequireScopeLayer {
+    required_scopes: Vec<String>,
+}
+
+impl RequireScopeLayer {
+    pub fn new() -> Self {
+        Self {
+            required_scopes: Vec::new(),
+        }
+    }
+
+    pub fn with(mut self, require_scope: Vec<&str>) -> Self {
+        self.required_scopes = require_scope.iter().map(|s| s.to_string()).collect();
+        self
+    }
+}
+
+impl<S> Layer<S> for RequireScopeLayer {
+    type Service = RequireScopeMiddleware<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RequireScopeMiddleware {
+            inner,
+            required_scopes: self.required_scopes.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct RequireScopeMiddleware<S> {
+    inner: S,
+    required_scopes: Vec<String>,
+}
+
+impl<S> Service<Request> for RequireScopeMiddleware<S>
+where
+    S: Service<Request, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut request: Request) -> Self::Future {
+        let required_scopes = self.required_scopes.clone();
+        let mut inner = self.inner.clone();
+
+        Box::pin(async move {
+            match request.extract_parts::<Claims>().await {
+                Ok(claims) => {
+                    if claims.has_scopes(&required_scopes) {
+                        return inner.call(request).await;
+                    }
+                    let response = AuthError::NotSufficientScopes.into_response();
+                    Ok(response)
+                }
+                Err(_) => {
+                    let response = AuthError::InvalidToken.into_response();
+                    Ok(response)
+                }
+            }
+        })
     }
 }
 
@@ -101,6 +179,10 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
+use derive_more::Display;
+use thiserror::Error;
+use tower::{Layer, Service};
+
 #[cfg(not(any(test, feature = "mock_jwt")))]
 impl<S> FromRequestParts<S> for Claims
 where
@@ -113,9 +195,7 @@ where
             .extract::<TypedHeader<Authorization<Bearer>>>()
             .await
             .map_err(|_| AuthError::InvalidToken)?;
-
         let claims = parse_jwt_token(bearer.token()).map_err(|_| AuthError::InvalidToken)?;
-
         Ok(claims)
     }
 }
@@ -186,9 +266,10 @@ where
 }
 
 impl IntoResponse for AuthError {
-    fn into_response(self) -> Response {
+    fn into_response(self) -> axum::response::Response {
         let (status, error_message) = match self {
             AuthError::InvalidToken => (StatusCode::UNAUTHORIZED, "Invalid token"),
+            AuthError::NotSufficientScopes => (StatusCode::FORBIDDEN, "Not sufficient scopes"),
         };
         let body = Json(json!({
             "error": error_message,
@@ -197,9 +278,10 @@ impl IntoResponse for AuthError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error, Display)]
 pub enum AuthError {
     InvalidToken,
+    NotSufficientScopes,
 }
 
 #[cfg(test)]
@@ -224,7 +306,7 @@ mod tests {
             (chrono::Utc::now() + chrono::Duration::days(7)) - chrono::Duration::seconds(30);
         assert!(jwt_token.expires_in > now_plus_5_days.timestamp() as u64);
 
-        let claims = parse_jwt_token(jwt_token.access_token).unwrap();
+        let claims = parse_jwt_token(&jwt_token.access_token).unwrap();
         assert_eq!(vec!["customers:read".to_string()], claims.scopes);
         assert_eq!(email, claims.sub);
     }
@@ -235,7 +317,7 @@ mod tests {
         let email: String = FreeEmail().fake();
         let mut token = create_jwt_token(email, vec![]);
         token.access_token.push_str("a");
-        let claims = parse_jwt_token(token.access_token);
+        let claims = parse_jwt_token(&token.access_token);
         assert!(claims.is_err());
     }
 }
