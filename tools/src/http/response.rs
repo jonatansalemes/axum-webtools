@@ -3,10 +3,12 @@ use axum::response::IntoResponse;
 use axum::Json;
 use derive_more::with_trait::Display;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use thiserror::Error;
+use utoipa::ToSchema;
 use validator::{ValidationError, ValidationErrors};
 
 #[derive(Debug)]
@@ -76,20 +78,70 @@ impl IntoResponse for HttpError {
                 let message = format!("{:?}", sqlx_error);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({
-                        "message": message
+                    json!(InternalServerErrorResponse {
+                        message,
+                        status_code: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     }),
                 )
             }
-            Self::WithDetails(details) => (
-                details.status_code,
-                json!({
-                    "message": details.message
-                }),
-            ),
+            Self::WithDetails(details) => {
+                let message = details.message;
+                let status_code_enum = details.status_code;
+                let status_code = status_code_enum.as_u16();
+                (
+                    status_code_enum,
+                    match status_code_enum {
+                        StatusCode::CONFLICT => json!(ConflictResponse {
+                            message,
+                            status_code,
+                        }),
+                        StatusCode::UNAUTHORIZED => json!(UnauthorizedResponse {
+                            message,
+                            status_code,
+                        }),
+                        StatusCode::NOT_FOUND => json!(NotFoundResponse {
+                            message,
+                            status_code,
+                        }),
+                        StatusCode::INTERNAL_SERVER_ERROR => {
+                            json!(InternalServerErrorResponse {
+                                message,
+                                status_code,
+                            })
+                        }
+                        StatusCode::BAD_REQUEST => json!(BadRequestResponse {
+                            message,
+                            status_code,
+                        }),
+                        _ => json!(UnprocessableEntityResponse {
+                            message,
+                            status_code,
+                        }),
+                    },
+                )
+            }
             Self::ValidationError(validation_error_response) => {
-                let json_value = json!({
-                    "errors": validation_error_response.validation_errors
+                let messages = validation_error_response
+                    .validation_errors
+                    .iter()
+                    .map(|error| {
+                        let code = error.code.to_string();
+                        let message = error.message.clone().map(|m| m.to_string());
+                        let params = error
+                            .params
+                            .iter()
+                            .map(|(k, v)| (k.to_string(), v.clone()))
+                            .collect::<HashMap<_, _>>();
+                        BadRequestValidationErrorItemResponse {
+                            code,
+                            message,
+                            params,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let json_value = json!(BadRequestValidationErrorResponse {
+                    messages,
+                    status_code: StatusCode::BAD_REQUEST.as_u16(),
                 });
                 (StatusCode::BAD_REQUEST, json_value)
             }
@@ -98,6 +150,37 @@ impl IntoResponse for HttpError {
         (status_code, Json(body)).into_response()
     }
 }
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct BadRequestValidationErrorItemResponse {
+    pub code: String,
+    pub message: Option<String>,
+    pub params: HashMap<String, Value>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct BadRequestValidationErrorResponse {
+    pub messages: Vec<BadRequestValidationErrorItemResponse>,
+    pub status_code: u16,
+}
+
+macro_rules! http_error_struct {
+    ($name:ident) => {
+        #[derive(Serialize, Deserialize, ToSchema)]
+        pub struct $name {
+            pub message: String,
+            #[serde(rename = "statusCode")]
+            pub status_code: u16,
+        }
+    };
+}
+
+http_error_struct!(ConflictResponse);
+http_error_struct!(NotFoundResponse);
+http_error_struct!(InternalServerErrorResponse);
+http_error_struct!(BadRequestResponse);
+http_error_struct!(UnauthorizedResponse);
+http_error_struct!(UnprocessableEntityResponse);
 
 macro_rules! http_error {
     ($name:ident,$status_code:expr) => {
@@ -111,6 +194,8 @@ macro_rules! http_error {
         }
     };
 }
+
+http_error!(unprocessable_entity, StatusCode::UNPROCESSABLE_ENTITY);
 
 http_error!(conflict, StatusCode::CONFLICT);
 
@@ -167,7 +252,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             body,
-            "{\"errors\":[{\"code\":\"length\",\"message\":null,\"params\":{\"min\":5,\"value\":\"test\"}}]}"
+            "{\"messages\":[{\"code\":\"length\",\"message\":null,\"params\":{\"min\":5,\"value\":\"test\"}}],\"status_code\":400}"
         );
     }
 }

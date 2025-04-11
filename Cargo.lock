@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools"
-version = "0.1.29"
+version = "0.1.30"
 dependencies = [
  "argon2",
  "axum",
@@ -171,14 +171,15 @@ dependencies = [
  "thiserror 2.0.11",
  "tokio",
  "tower",
+ "utoipa",
  "validator",
 ]
 
 [[package]]
 name = "axum-webtools"
-version = "0.1.29"
+version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62dd1086d475c0c2be634932c81cc31cf8da1ff4b9262f68dd264d01f618221a"
+checksum = "e89f50143afa76c6a9e2fc3757c4fd7a75304fabf1d28a75a45fe0a48dda51f5"
 dependencies = [
  "argon2",
  "axum",
@@ -195,14 +196,15 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.11",
  "tower",
+ "utoipa",
  "validator",
 ]
 
 [[package]]
 name = "axum-webtools-macros"
-version = "0.1.29"
+version = "0.1.30"
 dependencies = [
- "axum-webtools 0.1.29 (registry+https://github.com/rust-lang/crates.io-index)",
+ "axum-webtools 0.1.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote",
  "syn",
 ]
@@ -1072,6 +1074,7 @@ checksum = "707907fe3c25f5424cce2cb7e1cbcafee6bdbe735ca90ef77c29e84591e5b9da"
 dependencies = [
  "equivalent",
  "hashbrown",
+ "serde",
 ]
 
 [[package]]
@@ -2353,6 +2356,29 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
+
+[[package]]
+name = "utoipa"
+version = "5.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "435c6f69ef38c9017b4b4eea965dfb91e71e53d869e896db40d1cf2441dd75c0"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "5.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a77d306bc75294fd52f3e99b13ece67c02c1a2789190a6f31d32f736624326f7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "validator"

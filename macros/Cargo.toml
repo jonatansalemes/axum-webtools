@@ -1,6 +1,6 @@
 [package]
 name = "axum-webtools-macros"
-version = "0.1.29"
+version = "0.1.30"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Jonatan Lemes"]
@@ -15,7 +15,7 @@ categories = ["web-programming"]
 [dependencies]
 quote = { version = "1.0.38" }
 syn = { version = "2.0.98", features = ["full"] }
-axum-webtools = "0.1.29"
+axum-webtools = "0.1.30"
 
 [lib]
 proc-macro = true
