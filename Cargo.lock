@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "argon2",
  "axum",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools-macros"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "quote",
  "syn",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools-pgsql-migrate"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "clap",
  "sha2",
