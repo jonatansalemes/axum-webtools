@@ -70,6 +70,18 @@ enum Commands {
         #[arg(short = 'v', long = "version")]
         version: u32,
     },
+
+    /// Redo the last dirty migration (mark as clean and reapply)
+    #[command(name = "redo")]
+    Redo {
+        /// Path to migrations directory
+        #[arg(short = 'p', long = "path", default_value = "migrations")]
+        path: String,
+
+        /// Database connection URL
+        #[arg(short = 'd', long = "database")]
+        database: String,
+    },
 }
 
 /// Migration features that control execution behavior
@@ -183,6 +195,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             version,
         } => {
             run_baseline(&path, &database, version).await?;
+        }
+        Commands::Redo { path, database } => {
+            run_redo(&path, &database).await?;
         }
     }
 
@@ -382,6 +397,28 @@ async fn check_dirty_migrations(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::
     Ok(())
 }
 
+/// Get current migration version
+async fn get_current_version(
+    pool: &sqlx::PgPool,
+) -> Result<Option<i64>, Box<dyn std::error::Error>> {
+    let result =
+        sqlx::query("SELECT MAX(version) as max_version FROM pgsql_migrate_schema_migrations")
+            .fetch_one(pool)
+            .await?;
+
+    let version: Option<i64> = result.get("max_version");
+    Ok(version)
+}
+
+/// Print current version
+async fn print_current_version(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    match get_current_version(pool).await? {
+        Some(version) => println!("Current version: {}", version),
+        None => println!("Current version: None (no migrations applied)"),
+    }
+    Ok(())
+}
+
 /// Parse migration files from directory
 fn parse_migrations(dir: &Path) -> Result<Vec<Migration>, Box<dyn std::error::Error>> {
     let mut migrations: Vec<Migration> = Vec::new();
@@ -575,6 +612,8 @@ async fn run_up(path: &str, database: &str) -> Result<(), Box<dyn std::error::Er
         println!("Applied {} migration(s).", applied_count);
     }
 
+    print_current_version(&pool).await?;
+
     Ok(())
 }
 
@@ -725,6 +764,8 @@ async fn run_down(
         println!("Rolled back {} migration(s).", rolled_back_count);
     }
 
+    print_current_version(&pool).await?;
+
     Ok(())
 }
 
@@ -789,6 +830,44 @@ async fn run_baseline(
             baselined_count, target_version
         );
     }
+
+    Ok(())
+}
+
+/// Redo the last dirty migration (mark as clean and reapply)
+async fn run_redo(path: &str, database: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database)
+        .await?;
+
+    ensure_schema_migrations_table(&pool).await?;
+
+    // Find the last dirty migration
+    let applied = get_applied_migrations(&pool).await?;
+    let dirty_migration = applied
+        .iter()
+        .filter(|(_, dirty, _)| *dirty)
+        .max_by_key(|(version, _, _)| version);
+
+    let (version, _, _) = match dirty_migration {
+        Some(m) => m,
+        None => {
+            println!("No dirty migrations found.");
+            return Ok(());
+        }
+    };
+
+    println!("Redoing migration version: {}", version);
+
+    // Mark as clean (not dirty) and delete from schema to allow run_up to reapply it
+    sqlx::query("DELETE FROM pgsql_migrate_schema_migrations WHERE version = $1")
+        .bind(version)
+        .execute(&pool)
+        .await?;
+
+    // Call run_up to reapply the migration
+    run_up(path, database).await?;
 
     Ok(())
 }
