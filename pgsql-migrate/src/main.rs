@@ -104,32 +104,14 @@ enum MigrationFeature {
     NoTransaction,
     /// Split statements into individual executions using -- split-start and -- split-end markers
     SplitStatements,
-    /// Skip this migration on specified environments
-    /// Example: skip-on-env(dev,homolog)
-    SkipOnEnv(Vec<String>),
 }
 
 impl MigrationFeature {
     /// Parse a feature from string
     fn from_str(s: &str) -> Option<Self> {
-        let trimmed = s.trim().to_lowercase();
-        match trimmed.as_str() {
+        match s.trim().to_lowercase().as_str() {
             "no-tx" => Some(MigrationFeature::NoTransaction),
             "split-statements" => Some(MigrationFeature::SplitStatements),
-            _ if trimmed.starts_with("skip-on-env(") && trimmed.ends_with(")") => {
-                // Parse skip-on-env(env1,env2,...)
-                let inner = &trimmed[12..trimmed.len() - 1]; // Extract content between parentheses
-                let envs: Vec<String> = inner
-                    .split(',')
-                    .map(|e| e.trim().to_string())
-                    .filter(|e| !e.is_empty())
-                    .collect();
-                if envs.is_empty() {
-                    None
-                } else {
-                    Some(MigrationFeature::SkipOnEnv(envs))
-                }
-            }
             _ => None,
         }
     }
@@ -165,28 +147,6 @@ impl MigrationSpec {
     /// Check if this spec has the SplitStatements feature
     fn has_split_statements(&self) -> bool {
         self.features.contains(&MigrationFeature::SplitStatements)
-    }
-
-    /// Check if this migration should be skipped based on the current environment
-    fn should_skip_on_env(&self, current_env: &str) -> bool {
-        for feature in &self.features {
-            if let MigrationFeature::SkipOnEnv(envs) = feature {
-                if envs.iter().any(|e| e.eq_ignore_ascii_case(current_env)) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// Get the environments that would cause this migration to be skipped
-    fn get_skip_envs(&self) -> Option<&Vec<String>> {
-        for feature in &self.features {
-            if let MigrationFeature::SkipOnEnv(envs) = feature {
-                return Some(envs);
-            }
-        }
-        None
     }
 
     /// Check if content is empty
@@ -334,11 +294,29 @@ fn compute_hash(content: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Represents a SQL block with optional skip-on-env environments
+#[derive(Debug, Clone)]
+struct SqlBlock {
+    content: String,
+    skip_on_env: Vec<String>,
+}
+
+impl SqlBlock {
+    /// Check if this block should be skipped based on the current environment
+    fn should_skip(&self, current_env: &str) -> bool {
+        self.skip_on_env
+            .iter()
+            .any(|e| e.eq_ignore_ascii_case(current_env))
+    }
+}
+
 /// Split SQL content into blocks using -- split-start and -- split-end markers
+/// Each block can optionally have a -- skip-on-env directive to skip it on certain environments
 /// Returns an error if markers are mismatched (start without end, end without start, or unclosed block)
-fn split_sql_by_markers(content: &str) -> Result<Vec<String>, String> {
+fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
     let mut blocks = Vec::new();
     let mut current_block = String::new();
+    let mut current_skip_envs: Vec<String> = Vec::new();
     let mut in_block = false;
     let mut block_start_line = 0;
 
@@ -356,6 +334,7 @@ fn split_sql_by_markers(content: &str) -> Result<Vec<String>, String> {
             in_block = true;
             block_start_line = line_number;
             current_block.clear();
+            current_skip_envs.clear();
             continue;
         }
 
@@ -369,14 +348,30 @@ fn split_sql_by_markers(content: &str) -> Result<Vec<String>, String> {
             // Save the block
             let block_content = current_block.trim().to_string();
             if !block_content.is_empty() {
-                blocks.push(block_content);
+                blocks.push(SqlBlock {
+                    content: block_content,
+                    skip_on_env: current_skip_envs.clone(),
+                });
             }
             in_block = false;
             current_block.clear();
+            current_skip_envs.clear();
             continue;
         }
 
         if in_block {
+            // Check for skip-on-env directive inside the block
+            if trimmed.starts_with("-- skip-on-env") {
+                let envs_str = trimmed.trim_start_matches("-- skip-on-env").trim();
+                current_skip_envs = envs_str
+                    .split(',')
+                    .map(|e| e.trim().to_lowercase())
+                    .filter(|e| !e.is_empty())
+                    .collect();
+                // Don't add this line to the block content
+                continue;
+            }
+
             if !current_block.is_empty() {
                 current_block.push('\n');
             }
@@ -573,19 +568,6 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
             continue;
         }
 
-        // Check if migration should be skipped based on environment
-        if migration.up.should_skip_on_env(env) {
-            if let Some(skip_envs) = migration.up.get_skip_envs() {
-                println!(
-                    "Skipping migration: {} (skip-on-env: {} matches current env: {})",
-                    migration.filename,
-                    skip_envs.join(","),
-                    env
-                );
-            }
-            continue;
-        }
-
         println!("Applying migration: {}", migration.filename);
 
         // Mark as dirty before applying
@@ -613,10 +595,21 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
                 Ok(blocks) => {
                     let mut exec_result: Result<(), Box<dyn std::error::Error>> = Ok(());
                     for (i, block) in blocks.iter().enumerate() {
+                        // Check if block should be skipped based on environment
+                        if block.should_skip(env) {
+                            println!(
+                                "  Skipping block {} (skip-on-env: {} matches current env: {})",
+                                i + 1,
+                                block.skip_on_env.join(","),
+                                env
+                            );
+                            continue;
+                        }
+
                         if use_transaction {
                             // Each block in its own transaction
                             let mut tx = pool.begin().await?;
-                            match tx.execute(block.as_str()).await {
+                            match tx.execute(block.content.as_str()).await {
                                 Ok(_) => {
                                     tx.commit().await?;
                                 }
@@ -628,7 +621,7 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
                             }
                         } else {
                             // Execute without transaction
-                            match pool.execute(block.as_str()).await {
+                            match pool.execute(block.content.as_str()).await {
                                 Ok(_) => {}
                                 Err(e) => {
                                     eprintln!("  Error in block {}: {}", i + 1, e);
@@ -728,19 +721,6 @@ async fn run_down(
         let version_u32 = version as u32;
 
         if let Some(migration) = migration_map.get(&version_u32) {
-            // Check if migration should be skipped based on environment
-            if migration.down.should_skip_on_env(env) {
-                if let Some(skip_envs) = migration.down.get_skip_envs() {
-                    println!(
-                        "Skipping rollback: {} (skip-on-env: {} matches current env: {})",
-                        migration.filename,
-                        skip_envs.join(","),
-                        env
-                    );
-                }
-                continue;
-            }
-
             println!("Rolling back migration: {}", migration.filename);
 
             if migration.down.is_empty() {
@@ -774,10 +754,21 @@ async fn run_down(
                     Ok(blocks) => {
                         let mut exec_result: Result<(), Box<dyn std::error::Error>> = Ok(());
                         for (i, block) in blocks.iter().enumerate() {
+                            // Check if block should be skipped based on environment
+                            if block.should_skip(env) {
+                                println!(
+                                    "  Skipping block {} (skip-on-env: {} matches current env: {})",
+                                    i + 1,
+                                    block.skip_on_env.join(","),
+                                    env
+                                );
+                                continue;
+                            }
+
                             if use_transaction {
                                 // Each block in its own transaction
                                 let mut tx = pool.begin().await?;
-                                match tx.execute(block.as_str()).await {
+                                match tx.execute(block.content.as_str()).await {
                                     Ok(_) => {
                                         tx.commit().await?;
                                     }
@@ -789,7 +780,7 @@ async fn run_down(
                                 }
                             } else {
                                 // Execute without transaction
-                                match pool.execute(block.as_str()).await {
+                                match pool.execute(block.content.as_str()).await {
                                     Ok(_) => {}
                                     Err(e) => {
                                         eprintln!("  Error in block {}: {}", i + 1, e);

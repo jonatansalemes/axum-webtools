@@ -254,37 +254,61 @@ GRANT ALL ON categories TO app_user;
 
 #### 3. Skip On Environment Feature (`skip-on-env`)
 
-Skip specific migrations based on the current environment. This is useful when you have migrations that should only run in certain environments (e.g., seed data only in dev/test, or production-only optimizations).
+Skip specific SQL blocks based on the current environment. This feature works at the **block level** within split statements, allowing fine-grained control over which blocks execute in different environments.
 
 Use the `--env` or `-e` CLI parameter to specify the current environment (default: `prod`).
 
-**Example: Skip seed data in production**
+**Example: Skip seed data blocks in production**
 
 ```sql
--- features: skip-on-env(prod)
+-- features: split-statements
 
--- This migration only runs in dev and homolog environments
-INSERT INTO users (email, password) VALUES
-    ('dev@example.com', 'devpass'),
-    ('test@example.com', 'testpass');
+-- Block 1: Schema changes (runs in all environments)
+-- split-start
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL
+);
+-- split-end
+
+-- Block 2: Seed data (skip in production)
+-- split-start
+-- skip-on-env prod
+INSERT INTO users (email) VALUES
+    ('dev@example.com'),
+    ('test@example.com');
+-- split-end
+
+-- Block 3: More schema changes (runs in all environments)
+-- split-start
+CREATE INDEX idx_users_email ON users(email);
+-- split-end
 ```
 
-**Example: Skip in multiple environments**
+**Example: Skip performance optimizations in dev/homolog**
 
 ```sql
--- features: skip-on-env(dev,homolog,staging)
+-- features: no-tx, split-statements
 
--- This migration only runs in production
-CREATE INDEX CONCURRENTLY idx_users_performance ON users(created_at, status);
+-- Block 1: Basic index (runs everywhere)
+-- split-start
+CREATE INDEX CONCURRENTLY idx_orders_user ON orders(user_id);
+-- split-end
+
+-- Block 2: Heavy index (skip in dev and homolog)
+-- split-start
+-- skip-on-env dev,homolog
+CREATE INDEX CONCURRENTLY idx_orders_complex ON orders(created_at, status, total);
+-- split-end
 ```
 
 **Running with environment:**
 
 ```bash
-# Run in dev environment - will skip migrations with skip-on-env(dev)
+# Run in dev environment - blocks with "-- skip-on-env dev" will be skipped
 pgsql-migrate up -d "postgres://user:pass@localhost/db" -e dev
 
-# Run in production (default) - will skip migrations with skip-on-env(prod)
+# Run in production (default) - blocks with "-- skip-on-env prod" will be skipped
 pgsql-migrate up -d "postgres://user:pass@localhost/db"
 
 # Run in homolog environment
