@@ -25,6 +25,10 @@ enum Commands {
         /// Database connection URL
         #[arg(short = 'd', long = "database")]
         database: String,
+
+        /// Environment name (used for skip-on-env feature)
+        #[arg(short = 'e', long = "env", default_value = "prod")]
+        env: String,
     },
 
     /// Run migrations down
@@ -37,6 +41,10 @@ enum Commands {
         /// Database connection URL
         #[arg(short = 'd', long = "database")]
         database: String,
+
+        /// Environment name (used for skip-on-env feature)
+        #[arg(short = 'e', long = "env", default_value = "prod")]
+        env: String,
 
         /// Number of migrations to rollback
         #[arg(default_value = "1")]
@@ -81,6 +89,10 @@ enum Commands {
         /// Database connection URL
         #[arg(short = 'd', long = "database")]
         database: String,
+
+        /// Environment name (used for skip-on-env feature)
+        #[arg(short = 'e', long = "env", default_value = "prod")]
+        env: String,
     },
 }
 
@@ -92,14 +104,32 @@ enum MigrationFeature {
     NoTransaction,
     /// Split statements into individual executions using -- split-start and -- split-end markers
     SplitStatements,
+    /// Skip this migration on specified environments
+    /// Example: skip-on-env(dev,homolog)
+    SkipOnEnv(Vec<String>),
 }
 
 impl MigrationFeature {
     /// Parse a feature from string
     fn from_str(s: &str) -> Option<Self> {
-        match s.trim().to_lowercase().as_str() {
+        let trimmed = s.trim().to_lowercase();
+        match trimmed.as_str() {
             "no-tx" => Some(MigrationFeature::NoTransaction),
             "split-statements" => Some(MigrationFeature::SplitStatements),
+            _ if trimmed.starts_with("skip-on-env(") && trimmed.ends_with(")") => {
+                // Parse skip-on-env(env1,env2,...)
+                let inner = &trimmed[12..trimmed.len() - 1]; // Extract content between parentheses
+                let envs: Vec<String> = inner
+                    .split(',')
+                    .map(|e| e.trim().to_string())
+                    .filter(|e| !e.is_empty())
+                    .collect();
+                if envs.is_empty() {
+                    None
+                } else {
+                    Some(MigrationFeature::SkipOnEnv(envs))
+                }
+            }
             _ => None,
         }
     }
@@ -135,6 +165,28 @@ impl MigrationSpec {
     /// Check if this spec has the SplitStatements feature
     fn has_split_statements(&self) -> bool {
         self.features.contains(&MigrationFeature::SplitStatements)
+    }
+
+    /// Check if this migration should be skipped based on the current environment
+    fn should_skip_on_env(&self, current_env: &str) -> bool {
+        for feature in &self.features {
+            if let MigrationFeature::SkipOnEnv(envs) = feature {
+                if envs.iter().any(|e| e.eq_ignore_ascii_case(current_env)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Get the environments that would cause this migration to be skipped
+    fn get_skip_envs(&self) -> Option<&Vec<String>> {
+        for feature in &self.features {
+            if let MigrationFeature::SkipOnEnv(envs) = feature {
+                return Some(envs);
+            }
+        }
+        None
     }
 
     /// Check if content is empty
@@ -176,15 +228,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Up { path, database } => {
-            run_up(&path, &database).await?;
+        Commands::Up {
+            path,
+            database,
+            env,
+        } => {
+            run_up(&path, &database, &env).await?;
         }
         Commands::Down {
             path,
             database,
+            env,
             count,
         } => {
-            run_down(&path, &database, count).await?;
+            run_down(&path, &database, &env, count).await?;
         }
         Commands::Create { dir, name } => {
             create_migration(&dir, &name)?;
@@ -196,8 +253,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             run_baseline(&path, &database, version).await?;
         }
-        Commands::Redo { path, database } => {
-            run_redo(&path, &database).await?;
+        Commands::Redo {
+            path,
+            database,
+            env,
+        } => {
+            run_redo(&path, &database, &env).await?;
         }
     }
 
@@ -473,7 +534,8 @@ fn parse_migrations(dir: &Path) -> Result<Vec<Migration>, Box<dyn std::error::Er
 }
 
 /// Run migrations up
-async fn run_up(path: &str, database: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Running migrations in environment: {}", env);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database)
@@ -507,6 +569,19 @@ async fn run_up(path: &str, database: &str) -> Result<(), Box<dyn std::error::Er
                     eprintln!("    Stored hash:  {}", hash);
                     eprintln!("    Current hash: {}", current_hash);
                 }
+            }
+            continue;
+        }
+
+        // Check if migration should be skipped based on environment
+        if migration.up.should_skip_on_env(env) {
+            if let Some(skip_envs) = migration.up.get_skip_envs() {
+                println!(
+                    "Skipping migration: {} (skip-on-env: {} matches current env: {})",
+                    migration.filename,
+                    skip_envs.join(","),
+                    env
+                );
             }
             continue;
         }
@@ -621,8 +696,10 @@ async fn run_up(path: &str, database: &str) -> Result<(), Box<dyn std::error::Er
 async fn run_down(
     path: &str,
     database: &str,
+    env: &str,
     count: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Running rollback in environment: {}", env);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database)
@@ -651,6 +728,19 @@ async fn run_down(
         let version_u32 = version as u32;
 
         if let Some(migration) = migration_map.get(&version_u32) {
+            // Check if migration should be skipped based on environment
+            if migration.down.should_skip_on_env(env) {
+                if let Some(skip_envs) = migration.down.get_skip_envs() {
+                    println!(
+                        "Skipping rollback: {} (skip-on-env: {} matches current env: {})",
+                        migration.filename,
+                        skip_envs.join(","),
+                        env
+                    );
+                }
+                continue;
+            }
+
             println!("Rolling back migration: {}", migration.filename);
 
             if migration.down.is_empty() {
@@ -835,7 +925,7 @@ async fn run_baseline(
 }
 
 /// Redo the last dirty migration (mark as clean and reapply)
-async fn run_redo(path: &str, database: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_redo(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std::error::Error>> {
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database)
@@ -867,7 +957,7 @@ async fn run_redo(path: &str, database: &str) -> Result<(), Box<dyn std::error::
         .await?;
 
     // Call run_up to reapply the migration
-    run_up(path, database).await?;
+    run_up(path, database, env).await?;
 
     Ok(())
 }

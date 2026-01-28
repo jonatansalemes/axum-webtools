@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools"
-version = "0.1.32"
+version = "0.1.33"
 dependencies = [
  "argon2",
  "axum",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools-macros"
-version = "0.1.32"
+version = "0.1.33"
 dependencies = [
  "quote",
  "syn",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools-pgsql-migrate"
-version = "0.1.32"
+version = "0.1.33"
 dependencies = [
  "clap",
  "sha2",
@@ -1150,9 +1150,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "10.2.0"
+version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c76e1c7d7df3e34443b3621b459b066a7b79644f059fc8b2db7070c825fd417e"
+checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
 dependencies = [
  "aws-lc-rs",
  "base64",
@@ -1478,9 +1478,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74d9a594b72ae6656596548f56f667211f8a97b3d4c3d467150794690dc40a"
+checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
 ]

@@ -145,11 +145,17 @@ pgsql-migrate create -s "create_users_table"
 # Run all pending migrations
 pgsql-migrate up -d "postgres://user:pass@localhost/db"
 
+# Run migrations with specific environment (default: prod)
+pgsql-migrate up -d "postgres://user:pass@localhost/db" -e dev
+
 # Rollback migrations (rollback 1 migration by default)
 pgsql-migrate down -d "postgres://user:pass@localhost/db"
 
 # Rollback specific number of migrations
 pgsql-migrate down -d "postgres://user:pass@localhost/db" 3
+
+# Rollback with specific environment
+pgsql-migrate down -d "postgres://user:pass@localhost/db" -e dev 3
 
 # Baseline existing migrations (mark as applied without running)
 pgsql-migrate baseline -d "postgres://user:pass@localhost/db" -v 5
@@ -246,7 +252,46 @@ GRANT ALL ON categories TO app_user;
 -- split-end
 ```
 
-#### 3. Combined Features
+#### 3. Skip On Environment Feature (`skip-on-env`)
+
+Skip specific migrations based on the current environment. This is useful when you have migrations that should only run in certain environments (e.g., seed data only in dev/test, or production-only optimizations).
+
+Use the `--env` or `-e` CLI parameter to specify the current environment (default: `prod`).
+
+**Example: Skip seed data in production**
+
+```sql
+-- features: skip-on-env(prod)
+
+-- This migration only runs in dev and homolog environments
+INSERT INTO users (email, password) VALUES
+    ('dev@example.com', 'devpass'),
+    ('test@example.com', 'testpass');
+```
+
+**Example: Skip in multiple environments**
+
+```sql
+-- features: skip-on-env(dev,homolog,staging)
+
+-- This migration only runs in production
+CREATE INDEX CONCURRENTLY idx_users_performance ON users(created_at, status);
+```
+
+**Running with environment:**
+
+```bash
+# Run in dev environment - will skip migrations with skip-on-env(dev)
+pgsql-migrate up -d "postgres://user:pass@localhost/db" -e dev
+
+# Run in production (default) - will skip migrations with skip-on-env(prod)
+pgsql-migrate up -d "postgres://user:pass@localhost/db"
+
+# Run in homolog environment
+pgsql-migrate up -d "postgres://user:pass@localhost/db" -e homolog
+```
+
+#### 4. Combined Features
 
 You can combine features for complex scenarios:
 

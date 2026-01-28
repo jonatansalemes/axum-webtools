@@ -1,6 +1,6 @@
 [package]
 name = "axum-webtools"
-version = "0.1.32"
+version = "0.1.33"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Jonatan Lemes"]
@@ -20,7 +20,7 @@ chrono = { version = "0.4.43", features = ["serde"] }
 derive_more = { version = "2.1.1", features = ["display"] }
 futures-util = { version = "0.3.31" }
 http-body-util = { version = "0.1.3" }
-jsonwebtoken = { version = "10.2.0" ,default-features = false, features = ["aws_lc_rs"]}
+jsonwebtoken = { version = "10.3.0" ,default-features = false, features = ["aws_lc_rs"]}
 rand_core = { version = "0.9.5", features = ["os_rng"] }
 scoped-futures = { version = "0.1.4" }
 serde = { version = "1.0.228", features = ["derive"] }
