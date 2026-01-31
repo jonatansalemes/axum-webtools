@@ -1,0 +1,76 @@
+x-template: &template
+  build:
+    context: .
+    dockerfile: ./Dockerfile
+    target: task
+  image: axum_webtools_template
+  depends_on:
+    kafka:
+      condition: service_healthy
+  environment:
+    # Runtime environment
+    ENV: dev
+    RUST_LOG: server=DEBUG,INFO
+    RUST_BACKTRACE: FULL
+
+  volumes:
+    - ./:/app
+    - cargo_registry:/usr/local/cargo/registry
+    - cargo_git:/usr/local/cargo/git
+    - cargo_target:/app/target
+  restart: unless-stopped
+  networks:
+    - axum-webtools-network
+
+
+services:
+
+  task:
+    <<: *template
+    image: axum-webtools-task
+
+  kafka:
+    image: confluentinc/cp-kafka:8.0.0
+    environment:
+      CLUSTER_ID: qv6BBXI9TKuOcPZWfd89as
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+    command:
+      - bash
+      - -c
+      - |
+        # Only run format if storage is empty
+        if [ ! -f /tmp/kraft-combined-logs/meta.properties ]; then
+          kafka-storage format \
+            --ignore-formatted \
+            --cluster-id="${CLUSTER_ID}" \
+            --config /etc/kafka/kraft/server.properties
+        fi
+        # Run Kafka
+        /etc/confluent/docker/run
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-topics --bootstrap-server kafka:9092 --list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - axum-webtools-network
+    restart: unless-stopped
+
+volumes:
+  cargo_registry:
+  cargo_git:
+  cargo_target:
+
+networks:
+  axum-webtools-network:
+    driver: bridge

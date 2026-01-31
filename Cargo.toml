@@ -5,4 +5,5 @@ members = [
     "next-release",
     "macros",
     "pgsql-migrate",
+    "dlq-redrive",
 ]

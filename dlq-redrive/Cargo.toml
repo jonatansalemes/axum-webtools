@@ -1,0 +1,28 @@
+[package]
+name = "axum-webtools-dlq-redrive"
+version = "0.1.35"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Jonatan Lemes"]
+description = "Kafka DLQ redrive tool for axum web framework."
+repository = "https://github.com/jonatansalemes/axum-webtools.git"
+homepage = "https://github.com/jonatansalemes/axum-webtools.git"
+documentation = "https://docs.rs/axum-webtools"
+readme = "../README.md"
+keywords = ["axum", "kafka", "dlq", "redrive"]
+categories = ["web-programming"]
+
+[[bin]]
+name = "dlq-redrive"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.49.0", features = ["full"] }
+clap = { version = "4.5.56", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.149" }
+chrono = { version = "0.4.43" }
+rdkafka = { version = "0.39.0", features = ["cmake-build"] }
+
+[dev-dependencies]
+rand = { version = "0.9.2" }
