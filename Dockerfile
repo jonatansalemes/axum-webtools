@@ -7,3 +7,17 @@ RUN rustup component add rustfmt
 RUN rustup component add clippy
 RUN cargo install cargo-edit
 
+FROM base AS builder-dlq-redrive
+COPY ./dlq-redrive/Cargo.toml ./
+RUN mkdir src
+RUN echo "fn main() {}" > src/main.rs
+RUN cargo build --release
+RUN rm -rf ./src target/release/deps/dlq_redrive*
+COPY ./dlq-redrive/src ./src
+RUN cargo build --release
+
+FROM scratch AS prod-dlq-redrive
+COPY --from=builder-dlq-redrive /app/target/release/dlq-redrive ./dlq-redrive
+USER 65534:65534
+ENTRYPOINT ["./dlq-redrive"]
+CMD ["-h"]

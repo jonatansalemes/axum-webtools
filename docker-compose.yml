@@ -29,6 +29,14 @@ services:
     <<: *template
     image: axum-webtools-task
 
+  prod-dlq-redrive:
+    <<: *template
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      target: prod-dlq-redrive
+    image: axum-webtools-prod-dlq-redrive
+
   kafka:
     image: confluentinc/cp-kafka:8.0.0
     environment:

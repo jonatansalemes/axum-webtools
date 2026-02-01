@@ -48,5 +48,11 @@ publish-axum-webtools-pgsql-migrate:
 publish-axum-webtools-dlq-redrive:
 	@cargo run --bin next-release - dlq-redrive && cargo publish --allow-dirty -p axum-webtools-dlq-redrive
 
+publish-axum-webtools-dlq-redrive-docker-image:
+	@docker build -t axum-webtools-dlq-redrive:latest --target prod-dlq-redrive -f ./Dockerfile .
+	@docker tag axum-webtools-dlq-redrive:latest jslsolucoes/axum-webtools-dlq-redrive:latest
+	@docker push jslsolucoes/axum-webtools-dlq-redrive:latest
+	@echo "Published Docker image for axum-webtools-dlq-redrive"
+
 publish-all: pre-checks publish-axum-webtools publish-axum-webtools-macros publish-axum-webtools-pgsql-migrate publish-axum-webtools-dlq-redrive
 	@echo "Published all packages"
