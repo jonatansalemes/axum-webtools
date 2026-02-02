@@ -1,0 +1,27 @@
+name: pr-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pr-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check single commit
+        run: |
+          count=$(git rev-list --count origin/${{ github.base_ref }}..HEAD)
+          if [ "$count" -ne 2 ]; then
+            echo "❌ PR must have exactly 1 commit. Current: $count"
+            exit 1
+          fi
+          echo "✅ Single commit check passed"
+
+      - name: Check Conventional Commit
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: .github/commitlint.config.mjs

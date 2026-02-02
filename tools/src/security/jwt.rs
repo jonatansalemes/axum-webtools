@@ -322,7 +322,7 @@ mod tests {
         setup();
         let email: String = FreeEmail().fake();
         let mut token = create_jwt_token(email, vec![]);
-        token.access_token.push_str("a");
+        token.access_token.push('a');
         let claims = parse_jwt_token(&token.access_token);
         assert!(claims.is_err());
     }
