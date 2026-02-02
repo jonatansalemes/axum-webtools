@@ -16,11 +16,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     if: github.event.inputs.force == 'true' || github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          ssh-key: ${{ secrets.DEPLOY_KEY_PRIVATE_KEY }}
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
