@@ -15,7 +15,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    if: github.event.inputs.force == 'true' || github.ref == 'refs/heads/main'
+    if: |
+      (github.event.inputs.force == 'true' || github.ref == 'refs/heads/main') && github.event.head_commit.author.username != 'github-actions[bot]'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
