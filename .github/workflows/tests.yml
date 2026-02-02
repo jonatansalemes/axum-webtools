@@ -1,0 +1,36 @@
+name: tests
+
+permissions:
+  contents: read
+  pull-requests: read
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force run tests even if no changes detected'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-tests
+  cancel-in-progress: true
+
+jobs:
+  test-rust:
+    name: Test Rust components
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: dlq-redrive
+            needs_kafka: true
+    uses: ./.github/workflows/tests-component-rust.yml
+    with:
+      force: ${{ github.event.inputs.force || false }}
+      component: ${{ matrix.component }}
+      needs_kafka: ${{ matrix.needs_kafka || false }}
+

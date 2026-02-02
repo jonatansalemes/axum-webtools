@@ -1,0 +1,134 @@
+name: test-reusable-rust
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: Component name to test
+        type: string
+        required: true
+      needs_kafka:
+        description: Whether to start Kafka service
+        type: boolean
+        required: false
+        default: false
+      force:
+        description: Force run tests even if no changes detected
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.changes.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            has_changes:
+              - "${{ inputs.component }}/**"
+              - ".github/workflows/**"
+
+  test:
+    name: Test ${{ inputs.component }}
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.has_changes == 'true' || inputs.force == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Start Kafka
+        if: inputs.needs_kafka
+        run: |
+          docker run -d \
+            --name kafka \
+            -e CLUSTER_ID=qv6BBXI9TKuOcPZWf8PoAQ \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+            -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
+            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092 \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT \
+            -e KAFKA_LOG_DIRS=/tmp/kraft-combined-logs \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_AUTO_CREATE_TOPICS_ENABLE=true \
+            -p 9092:9092 \
+            --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list" \
+            --health-interval 10s \
+            --health-timeout 5s \
+            --health-retries 5 \
+            confluentinc/cp-kafka:8.0.0
+
+      - name: Wait for services to be healthy
+        if: inputs.needs_kafka
+        run: |
+          echo "Waiting for services to be ready..."
+
+          wait_for_service() {
+            local container=$1
+            local max_attempts=30
+            local attempt=0
+
+            while [ $attempt -lt $max_attempts ]; do
+              if docker inspect --format='{{.State.Health.Status}}' $container 2>/dev/null | grep -q "healthy"; then
+                echo "$container is healthy"
+                return 0
+              fi
+              echo "Waiting for $container... ($((attempt + 1))/$max_attempts)"
+              sleep 2
+              attempt=$((attempt + 1))
+            done
+
+            echo "ERROR: $container failed to become healthy"
+            docker logs $container
+            return 1
+          }
+
+          ${{ inputs.needs_kafka == true && 'wait_for_service kafka' || ':' }}
+         
+          echo "All required services are ready!"
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.component }} -> target
+
+      - name: Check Rust format
+        working-directory: ./${{ inputs.component }}
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy (Rust linter)
+        working-directory: ./${{ inputs.component }}
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build project
+        working-directory: ./${{ inputs.component }}
+        run: cargo build --verbose
+
+      - name: Run tests
+        working-directory: ./${{ inputs.component }}
+        env:
+          KAFKA_BROKERS: localhost:9092
+        run: cargo test --verbose

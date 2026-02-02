@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "tools",
-    "next-release",
     "macros",
     "pgsql-migrate",
     "dlq-redrive",

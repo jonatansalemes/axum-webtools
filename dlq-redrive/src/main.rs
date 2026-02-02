@@ -455,10 +455,14 @@ mod tests {
         )
     }
 
+    fn get_bootstrap_server() -> String {
+        std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "localhost:9092".to_string())
+    }
+
     #[tokio::test]
     async fn test_run_status_with_kafka() {
-        let bootstrap_server = "kafka:9092";
-        let source_topic = create_test_topic(bootstrap_server, "status-test", 1)
+        let bootstrap_server = get_bootstrap_server();
+        let source_topic = create_test_topic(&bootstrap_server, "status-test", 1)
             .await
             .expect("Failed to create test topic");
         let consumer_group = random_consumer_group();
@@ -466,11 +470,11 @@ mod tests {
         let msg1 = create_message_with_timestamp(1, "test1");
         let msg2 = create_message_with_timestamp(2, "test2");
         let messages = vec![("key1", msg1.as_str()), ("key2", msg2.as_str())];
-        send_test_messages(bootstrap_server, &source_topic, messages)
+        send_test_messages(&bootstrap_server, &source_topic, messages)
             .await
             .expect("Failed to send test messages");
 
-        let result = run_status(bootstrap_server, &source_topic, &consumer_group)
+        let result = run_status(&bootstrap_server, &source_topic, &consumer_group)
             .await
             .expect("Failed to get status");
 
@@ -513,29 +517,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_status_multiple_topics() {
-        let bootstrap_server = "kafka:9092";
+        let bootstrap_server = get_bootstrap_server();
         let consumer_group = random_consumer_group();
 
         let topic_prefixes = vec!["multi-test-dlq", "multi-test-main", "multi-test-poison"];
         let mut topics = Vec::new();
 
         for prefix in topic_prefixes {
-            let topic = create_test_topic(bootstrap_server, prefix, 1)
+            let topic = create_test_topic(&bootstrap_server, prefix, 1)
                 .await
-                .expect(&format!("Failed to create topic with prefix: {}", prefix));
+                .unwrap_or_else(|_| panic!("Failed to create topic with prefix: {}", prefix));
             topics.push(topic);
         }
 
         for topic in &topics {
             let msg = create_message_with_timestamp(1, "content1");
             let messages = vec![("key1", msg.as_str())];
-            send_test_messages(bootstrap_server, topic, messages)
+            send_test_messages(&bootstrap_server, topic, messages)
                 .await
-                .expect(&format!("Failed to send messages to topic: {}", topic));
+                .unwrap_or_else(|_| panic!("Failed to send messages to topic: {}", topic));
 
-            let result = run_status(bootstrap_server, topic, &consumer_group)
+            let result = run_status(&bootstrap_server, topic, &consumer_group)
                 .await
-                .expect(&format!("Failed to get status for topic: {}", topic));
+                .unwrap_or_else(|_| panic!("Failed to get status for topic: {}", topic));
 
             assert_eq!(result.topic, *topic);
             assert_eq!(result.consumer_group, consumer_group);
@@ -546,13 +550,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_status_with_empty_topic() {
-        let bootstrap_server = "kafka:9092";
-        let source_topic = create_test_topic(bootstrap_server, "empty-test", 1)
+        let bootstrap_server = get_bootstrap_server();
+        let source_topic = create_test_topic(&bootstrap_server, "empty-test", 1)
             .await
             .expect("Failed to create test topic");
         let consumer_group = random_consumer_group();
 
-        let result = run_status(bootstrap_server, &source_topic, &consumer_group)
+        let result = run_status(&bootstrap_server, &source_topic, &consumer_group)
             .await
             .expect("Failed to get status for empty topic");
 
@@ -575,14 +579,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_redrive_with_kafka() {
-        let bootstrap_server = "kafka:9092";
-        let source_topic = create_test_topic(bootstrap_server, "redrive-source", 1)
+        let bootstrap_server = get_bootstrap_server();
+        let source_topic = create_test_topic(&bootstrap_server, "redrive-source", 1)
             .await
             .expect("Failed to create source topic");
-        let target_topic = create_test_topic(bootstrap_server, "redrive-target", 1)
+        let target_topic = create_test_topic(&bootstrap_server, "redrive-target", 1)
             .await
             .expect("Failed to create target topic");
-        let poison_topic = create_test_topic(bootstrap_server, "redrive-poison", 1)
+        let poison_topic = create_test_topic(&bootstrap_server, "redrive-poison", 1)
             .await
             .expect("Failed to create poison topic");
         let consumer_group = random_consumer_group();
@@ -592,12 +596,12 @@ mod tests {
         let msg1 = create_message_with_timestamp(1, "recent message");
         let msg2 = create_message_with_timestamp(10, "old message");
         let messages = vec![("key1", msg1.as_str()), ("key2", msg2.as_str())];
-        send_test_messages(bootstrap_server, &source_topic, messages)
+        send_test_messages(&bootstrap_server, &source_topic, messages)
             .await
             .expect("Failed to send test messages");
 
         let result = run_redrive(
-            bootstrap_server,
+            &bootstrap_server,
             &source_topic,
             &target_topic,
             &poison_topic,
@@ -637,14 +641,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_redrive_empty_topic() {
-        let bootstrap_server = "kafka:9092";
-        let source_topic = create_test_topic(bootstrap_server, "redrive-empty-source", 1)
+        let bootstrap_server = get_bootstrap_server();
+        let source_topic = create_test_topic(&bootstrap_server, "redrive-empty-source", 1)
             .await
             .expect("Failed to create source topic");
-        let target_topic = create_test_topic(bootstrap_server, "redrive-empty-target", 1)
+        let target_topic = create_test_topic(&bootstrap_server, "redrive-empty-target", 1)
             .await
             .expect("Failed to create target topic");
-        let poison_topic = create_test_topic(bootstrap_server, "redrive-empty-poison", 1)
+        let poison_topic = create_test_topic(&bootstrap_server, "redrive-empty-poison", 1)
             .await
             .expect("Failed to create poison topic");
         let consumer_group = random_consumer_group();
@@ -652,7 +656,7 @@ mod tests {
         let max_messages = 1;
 
         let result = run_redrive(
-            bootstrap_server,
+            &bootstrap_server,
             &source_topic,
             &target_topic,
             &poison_topic,
@@ -672,14 +676,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_redrive_result_structure() {
-        let bootstrap_server = "kafka:9092";
-        let source_topic = create_test_topic(bootstrap_server, "redrive-struct-source", 1)
+        let bootstrap_server = get_bootstrap_server();
+        let source_topic = create_test_topic(&bootstrap_server, "redrive-struct-source", 1)
             .await
             .expect("Failed to create source topic");
-        let target_topic = create_test_topic(bootstrap_server, "redrive-struct-target", 1)
+        let target_topic = create_test_topic(&bootstrap_server, "redrive-struct-target", 1)
             .await
             .expect("Failed to create target topic");
-        let poison_topic = create_test_topic(bootstrap_server, "redrive-struct-poison", 1)
+        let poison_topic = create_test_topic(&bootstrap_server, "redrive-struct-poison", 1)
             .await
             .expect("Failed to create poison topic");
         let consumer_group = random_consumer_group();
@@ -689,12 +693,12 @@ mod tests {
         let msg1 = create_message_with_timestamp(1, "recent");
         let msg2 = create_message_with_timestamp(7, "old");
         let messages = vec![("key1", msg1.as_str()), ("key2", msg2.as_str())];
-        send_test_messages(bootstrap_server, &source_topic, messages)
+        send_test_messages(&bootstrap_server, &source_topic, messages)
             .await
             .expect("Failed to send test messages");
 
         let result = run_redrive(
-            bootstrap_server,
+            &bootstrap_server,
             &source_topic,
             &target_topic,
             &poison_topic,
@@ -718,14 +722,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_redrive_advance_offset() {
-        let bootstrap_server = "kafka:9092";
-        let source_topic = create_test_topic(bootstrap_server, "redrive-offset-source", 1)
+        let bootstrap_server = get_bootstrap_server();
+        let source_topic = create_test_topic(&bootstrap_server, "redrive-offset-source", 1)
             .await
             .expect("Failed to create source topic");
-        let target_topic = create_test_topic(bootstrap_server, "redrive-offset-target", 1)
+        let target_topic = create_test_topic(&bootstrap_server, "redrive-offset-target", 1)
             .await
             .expect("Failed to create target topic");
-        let poison_topic = create_test_topic(bootstrap_server, "redrive-offset-poison", 1)
+        let poison_topic = create_test_topic(&bootstrap_server, "redrive-offset-poison", 1)
             .await
             .expect("Failed to create poison topic");
 
@@ -745,13 +749,16 @@ mod tests {
             ("key2", msg2.as_str()),
             ("key3", msg3.as_str()),
         ];
-        send_test_messages(bootstrap_server, &source_topic, messages_batch1)
+        send_test_messages(&bootstrap_server, &source_topic, messages_batch1)
             .await
             .expect("Failed to send first batch of messages");
 
+        // Wait for Kafka to propagate messages
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
         // Run redrive for first batch
         let result1 = run_redrive(
-            bootstrap_server,
+            &bootstrap_server,
             &source_topic,
             &target_topic,
             &poison_topic,
@@ -781,13 +788,16 @@ mod tests {
             ("key5", msg5.as_str()),
             ("key6", msg6.as_str()),
         ];
-        send_test_messages(bootstrap_server, &source_topic, messages_batch2)
+        send_test_messages(&bootstrap_server, &source_topic, messages_batch2)
             .await
             .expect("Failed to send second batch of messages");
 
+        // Wait for Kafka to propagate messages
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
         // Run redrive again with same consumer group
         let result2 = run_redrive(
-            bootstrap_server,
+            &bootstrap_server,
             &source_topic,
             &target_topic,
             &poison_topic,
@@ -810,7 +820,7 @@ mod tests {
         assert_eq!(result2.poison_count, 0, "No messages should be poisoned");
 
         // Verify total messages in target topic is 6
-        let status = run_status(bootstrap_server, &target_topic, &random_consumer_group())
+        let status = run_status(&bootstrap_server, &target_topic, &random_consumer_group())
             .await
             .expect("Failed to get target topic status");
 

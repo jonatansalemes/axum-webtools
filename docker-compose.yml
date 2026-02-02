@@ -8,11 +8,10 @@ x-template: &template
     kafka:
       condition: service_healthy
   environment:
-    # Runtime environment
     ENV: dev
     RUST_LOG: server=DEBUG,INFO
     RUST_BACKTRACE: FULL
-
+    KAFKA_BROKERS: kafka:9092
   volumes:
     - ./:/app
     - cargo_registry:/usr/local/cargo/registry
