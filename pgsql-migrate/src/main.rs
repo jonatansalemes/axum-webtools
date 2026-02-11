@@ -94,6 +94,62 @@ enum Commands {
         #[arg(short = 'e', long = "env", default_value = "prod")]
         env: String,
     },
+
+    /// Create a database backup using pg_dump
+    #[command(name = "backup")]
+    Backup {
+        /// Database connection URL
+        #[arg(short = 'd', long = "database")]
+        database: String,
+
+        /// Output file path for the backup
+        #[arg(short = 'o', long = "output")]
+        output: String,
+
+        /// Backup format: plain (SQL), custom, directory, or tar
+        #[arg(short = 'f', long = "format", default_value = "custom")]
+        format: String,
+
+        /// Compress the backup (level 0-9, only for custom/directory format)
+        #[arg(short = 'c', long = "compress")]
+        compress: Option<u8>,
+
+        /// Do not output commands to set ownership of objects
+        #[arg(long = "no-owner")]
+        no_owner: bool,
+
+        /// Prevent dumping of access privileges (grant/revoke commands)
+        #[arg(long = "no-acl")]
+        no_acl: bool,
+    },
+
+    /// Restore a database backup using pg_restore or psql
+    #[command(name = "restore")]
+    Restore {
+        /// Database connection URL
+        #[arg(short = 'd', long = "database")]
+        database: String,
+
+        /// Input file path for the backup
+        #[arg(short = 'i', long = "input")]
+        input: String,
+
+        /// Drop database objects before recreating them
+        #[arg(long = "clean")]
+        clean: bool,
+
+        /// Create the database before restoring
+        #[arg(long = "create")]
+        create: bool,
+
+        /// Do not output commands to set ownership of objects
+        #[arg(long = "no-owner")]
+        no_owner: bool,
+
+        /// Skip restoration of access privileges (grant/revoke commands)
+        #[arg(long = "no-acl")]
+        no_acl: bool,
+    },
 }
 
 /// Migration features that control execution behavior
@@ -219,6 +275,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             env,
         } => {
             run_redo(&path, &database, &env).await?;
+        }
+        Commands::Backup {
+            database,
+            output,
+            format,
+            compress,
+            no_owner,
+            no_acl,
+        } => {
+            run_backup(&database, &output, &format, compress, no_owner, no_acl).await?;
+        }
+        Commands::Restore {
+            database,
+            input,
+            clean,
+            create,
+            no_owner,
+            no_acl,
+        } => {
+            run_restore(&database, &input, clean, create, no_owner, no_acl).await?;
         }
     }
 
@@ -951,4 +1027,388 @@ async fn run_redo(path: &str, database: &str, env: &str) -> Result<(), Box<dyn s
     run_up(path, database, env).await?;
 
     Ok(())
+}
+
+/// Parse PostgreSQL connection URL to extract components
+fn parse_pg_url(url: &str) -> Result<PgConnectionInfo, Box<dyn std::error::Error>> {
+    // Expected format: postgresql://[user[:password]@][host][:port][/dbname][?params]
+    let url = url
+        .strip_prefix("postgresql://")
+        .or_else(|| url.strip_prefix("postgres://"))
+        .ok_or("Invalid PostgreSQL URL: must start with postgresql:// or postgres://")?;
+
+    let (auth_host, db_params) = url.split_once('/').unwrap_or((url, ""));
+    let (db_name, _params) = db_params.split_once('?').unwrap_or((db_params, ""));
+
+    let (auth, host_port) = if let Some((a, h)) = auth_host.rsplit_once('@') {
+        (Some(a), h)
+    } else {
+        (None, auth_host)
+    };
+
+    let (user, password) = if let Some(auth_str) = auth {
+        let (u, p) = auth_str.split_once(':').unwrap_or((auth_str, ""));
+        (
+            Some(u.to_string()),
+            if p.is_empty() {
+                None
+            } else {
+                Some(p.to_string())
+            },
+        )
+    } else {
+        (None, None)
+    };
+
+    let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
+        (h.to_string(), Some(p.to_string()))
+    } else {
+        (host_port.to_string(), None)
+    };
+
+    Ok(PgConnectionInfo {
+        host: if host.is_empty() {
+            "localhost".to_string()
+        } else {
+            host
+        },
+        port: port.unwrap_or_else(|| "5432".to_string()),
+        user: user.unwrap_or_else(|| "postgres".to_string()),
+        password,
+        database: if db_name.is_empty() {
+            "postgres".to_string()
+        } else {
+            db_name.to_string()
+        },
+    })
+}
+
+struct PgConnectionInfo {
+    host: String,
+    port: String,
+    user: String,
+    password: Option<String>,
+    database: String,
+}
+
+/// Check if a command exists in PATH
+fn command_exists(cmd: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// Create a database backup using pg_dump
+async fn run_backup(
+    database: &str,
+    output: &str,
+    format: &str,
+    compress: Option<u8>,
+    no_owner: bool,
+    no_acl: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Check if pg_dump exists
+    if !command_exists("pg_dump") {
+        return Err("pg_dump command not found. Please install PostgreSQL client tools. Example: sudo apt update && sudo apt install postgresql-client-16".into());
+    }
+
+    println!("Creating backup of database...");
+
+    let conn_info = parse_pg_url(database)?;
+
+    // Validate format
+    let format_flag = match format.to_lowercase().as_str() {
+        "plain" | "p" => "p",
+        "custom" | "c" => "c",
+        "directory" | "d" => "d",
+        "tar" | "t" => "t",
+        _ => {
+            return Err(format!(
+                "Invalid format '{}'. Use: plain, custom, directory, or tar",
+                format
+            )
+            .into())
+        }
+    };
+
+    // Validate compression level
+    if let Some(level) = compress {
+        if level > 9 {
+            return Err("Compression level must be between 0 and 9".into());
+        }
+        if format_flag == "p" {
+            return Err("Compression is not supported for plain format".into());
+        }
+    }
+
+    // Build pg_dump command
+    let mut cmd = std::process::Command::new("pg_dump");
+
+    cmd.arg("--host")
+        .arg(&conn_info.host)
+        .arg("--port")
+        .arg(&conn_info.port)
+        .arg("--username")
+        .arg(&conn_info.user)
+        .arg("--format")
+        .arg(format_flag)
+        .arg("--file")
+        .arg(output)
+        .arg("--verbose");
+
+    if let Some(level) = compress {
+        cmd.arg("--compress").arg(level.to_string());
+    }
+
+    if no_owner {
+        cmd.arg("--no-owner");
+    }
+
+    if no_acl {
+        cmd.arg("--no-acl");
+    }
+
+    cmd.arg(&conn_info.database);
+
+    // Set password via environment variable if provided
+    if let Some(ref password) = conn_info.password {
+        cmd.env("PGPASSWORD", password);
+    }
+
+    println!("Cmd: {:?}", cmd);
+
+    let output_result = cmd.output()?;
+
+    if output_result.status.success() {
+        println!("✓ Backup created successfully: {}", output);
+        println!("  Format: {}", format);
+        if let Some(level) = compress {
+            println!("  Compression: level {}", level);
+        }
+        if no_owner {
+            println!("  No ownership information");
+        }
+        if no_acl {
+            println!("  No ACL information");
+        }
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output_result.stderr);
+        Err(format!("pg_dump failed:\n{}", stderr).into())
+    }
+}
+
+/// Restore a database backup using pg_restore or psql
+async fn run_restore(
+    database: &str,
+    input: &str,
+    clean: bool,
+    create: bool,
+    no_owner: bool,
+    no_acl: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Restoring database from backup...");
+
+    let conn_info = parse_pg_url(database)?;
+
+    // Check if file exists
+    if !Path::new(input).exists() {
+        return Err(format!("Backup file not found: {}", input).into());
+    }
+
+    // Detect format by trying to read the file
+    let is_plain_sql = input.ends_with(".sql") || is_plain_sql_file(input)?;
+
+    let output_result = if is_plain_sql {
+        println!("Detected plain SQL format, using psql...");
+
+        // Check if psql exists
+        if !command_exists("psql") {
+            return Err("psql command not found. Please install PostgreSQL client tools. Example: sudo apt update && sudo apt install postgresql-client-16".into());
+        }
+
+        if no_owner || no_acl {
+            println!(
+                "  Warning: --no-owner and --no-acl flags are not supported for plain SQL format"
+            );
+        }
+
+        let mut cmd = std::process::Command::new("psql");
+
+        cmd.arg("--host")
+            .arg(&conn_info.host)
+            .arg("--port")
+            .arg(&conn_info.port)
+            .arg("--username")
+            .arg(&conn_info.user)
+            .arg("--dbname")
+            .arg(&conn_info.database)
+            .arg("--file")
+            .arg(input);
+
+        if let Some(ref password) = conn_info.password {
+            cmd.env("PGPASSWORD", password);
+        }
+
+        println!(
+            "Running: psql --host {} --port {} --username {} --dbname {} --file {}",
+            conn_info.host, conn_info.port, conn_info.user, conn_info.database, input
+        );
+
+        cmd.output()?
+    } else {
+        println!("Detected custom/directory/tar format, using pg_restore...");
+
+        // Check if pg_restore exists
+        if !command_exists("pg_restore") {
+            return Err("pg_restore command not found. Please install PostgreSQL client tools. Example: sudo apt update && sudo apt install postgresql-client-16".into());
+        }
+
+        let mut cmd = std::process::Command::new("pg_restore");
+
+        cmd.arg("--host")
+            .arg(&conn_info.host)
+            .arg("--port")
+            .arg(&conn_info.port)
+            .arg("--username")
+            .arg(&conn_info.user)
+            .arg("--dbname")
+            .arg(&conn_info.database)
+            .arg("--verbose");
+
+        if clean {
+            cmd.arg("--clean");
+        }
+
+        if create {
+            cmd.arg("--create");
+        }
+
+        if no_owner {
+            cmd.arg("--no-owner");
+        }
+
+        if no_acl {
+            cmd.arg("--no-acl");
+        }
+
+        cmd.arg(input);
+
+        if let Some(ref password) = conn_info.password {
+            cmd.env("PGPASSWORD", password);
+        }
+
+        println!(
+            "Running: pg_restore --host {} --port {} --username {} --dbname {} {}{}{}{}{}",
+            conn_info.host,
+            conn_info.port,
+            conn_info.user,
+            conn_info.database,
+            if clean { "--clean " } else { "" },
+            if create { "--create " } else { "" },
+            if no_owner { "--no-owner " } else { "" },
+            if no_acl { "--no-acl " } else { "" },
+            input
+        );
+
+        cmd.output()?
+    };
+
+    if output_result.status.success() {
+        println!("✓ Database restored successfully from: {}", input);
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output_result.stderr);
+        let stdout = String::from_utf8_lossy(&output_result.stdout);
+
+        // pg_restore sometimes outputs warnings to stderr even on success
+        // Check if there are actual errors or just warnings
+        if stderr.contains("ERROR") || stderr.contains("FATAL") {
+            Err(format!("Restore failed:\nSTDERR:\n{}\nSTDOUT:\n{}", stderr, stdout).into())
+        } else {
+            println!("✓ Database restored successfully from: {}", input);
+            if !stderr.is_empty() {
+                println!("Warnings:\n{}", stderr);
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Check if a file is plain SQL by reading the first few bytes
+fn is_plain_sql_file(path: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = [0u8; 8];
+    use std::io::Read;
+    let bytes_read = file.read(&mut buffer)?;
+
+    if bytes_read == 0 {
+        return Ok(true); // Empty file, treat as plain SQL
+    }
+
+    // Custom format starts with "PGDMP"
+    // Directory format is a directory
+    // Tar format starts with tar magic bytes
+    // Plain SQL is text-based
+
+    let is_custom = bytes_read >= 5 && &buffer[0..5] == b"PGDMP";
+    let is_text = buffer[0..bytes_read]
+        .iter()
+        .all(|&b| b.is_ascii() || b == b'\n' || b == b'\r' || b == b'\t');
+
+    Ok(!is_custom && is_text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::distr::{Alphanumeric, SampleString};
+
+    fn random_string(prefix: &str) -> String {
+        let random_suffix = Alphanumeric.sample_string(&mut rand::rng(), 8);
+        format!("{}-{}", prefix, random_suffix)
+    }
+
+    fn get_database_url() -> String {
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://pgsqlmigrate:pgsqlmigrate@pgsql:5432/pgsqlmigrate".to_string()
+        })
+    }
+
+    #[tokio::test]
+    async fn test_backup() -> Result<(), Box<dyn std::error::Error>> {
+        let database_url = get_database_url();
+        let backup_file = random_string("backup") + ".sql";
+        run_backup(&database_url, &backup_file, "custom", Some(9), true, true).await?;
+        assert!(
+            Path::new(&backup_file).exists(),
+            "Backup file was not created"
+        );
+        fs::remove_file(&backup_file)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_create_migration() -> Result<(), Box<dyn std::error::Error>> {
+        let migration_name = random_string("migration_");
+        let dir = "migrations";
+        let version = get_next_version(Path::new(dir))?;
+        let normalized_name = normalize_name(&migration_name);
+        create_migration(dir, &migration_name)?;
+        let expected_up = format!("{}/{:06}_{}.up.sql", dir, version, normalized_name);
+        let expected_down = format!("{}/{:06}_{}.down.sql", dir, version, normalized_name);
+        assert!(
+            Path::new(&expected_up).exists(),
+            "Up migration file was not created"
+        );
+        assert!(
+            Path::new(&expected_down).exists(),
+            "Down migration file was not created"
+        );
+        fs::remove_file(&expected_up)?;
+        fs::remove_file(&expected_down)?;
+        Ok(())
+    }
 }

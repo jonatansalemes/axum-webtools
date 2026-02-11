@@ -1,8 +1,8 @@
 [package]
 name = "axum-webtools-pgsql-migrate"
-version = "0.1.39"
+version = "0.1.40"
 edition = "2021"
-license = "Apache-2.0"
+license = "AGPL-3"
 authors = ["Jonatan Lemes"]
 description = "General purpose migrate sql for axum web framework."
 repository = "https://github.com/jonatansalemes/axum-webtools.git"
@@ -22,6 +22,6 @@ tokio = { version = "1.49.0", features = ["full"] }
 clap = { version = "4.5", features = ["derive"] }
 sha2 = { version = "0.10.9" }
 
-[features]
-mock_jwt = []
+[dev-dependencies]
+rand = { version = "0.10.0" }
 

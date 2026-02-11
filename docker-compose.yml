@@ -7,11 +7,14 @@ x-template: &template
   depends_on:
     kafka:
       condition: service_healthy
+    pgsql:
+      condition: service_healthy
   environment:
     ENV: dev
     RUST_LOG: server=DEBUG,INFO
     RUST_BACKTRACE: FULL
     KAFKA_BROKERS: kafka:9092
+    DATABASE_URL: postgres://pgsqlmigrate:pgsqlmigrate@pgsql:5432/pgsqlmigrate
   volumes:
     - ./:/app
     - cargo_registry:/usr/local/cargo/registry
@@ -35,6 +38,25 @@ services:
       dockerfile: ./Dockerfile
       target: prod-dlq-redrive
     image: axum-webtools-prod-dlq-redrive
+
+  pgsql:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pgsqlmigrate
+      POSTGRES_PASSWORD: pgsqlmigrate
+      POSTGRES_DB: pgsqlmigrate
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - axum-webtools-network
 
   kafka:
     image: confluentinc/cp-kafka:8.0.0
@@ -77,6 +99,7 @@ volumes:
   cargo_registry:
   cargo_git:
   cargo_target:
+  db_data:
 
 networks:
   axum-webtools-network:
