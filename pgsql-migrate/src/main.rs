@@ -1177,7 +1177,18 @@ async fn run_backup(
         cmd.env("PGPASSWORD", password);
     }
 
-    println!("Cmd: {:?}", cmd);
+    println!(
+        "Running: pg_dump --host {} --port {} --username {} --dbname {} --format {} --file {}{}{}{}",
+        conn_info.host,
+        conn_info.port,
+        conn_info.user,
+        conn_info.database,
+        format,
+        output,
+        if let Some(level) = compress { format!(" --compress {}", level) } else { String::new() },
+        if no_owner { " --no-owner" } else { "" },
+        if no_acl { " --no-acl" } else { "" }
+    );
 
     let output_result = cmd.output()?;
 
