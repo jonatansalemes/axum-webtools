@@ -1118,7 +1118,10 @@ fn get_pg_dump_version() -> Result<u32, Box<dyn std::error::Error>> {
         if token.chars().next().map_or(false, |c| c.is_ascii_digit()) && token.contains('.') {
             if let Some(major_version_str) = token.split('.').next() {
                 if let Ok(version) = major_version_str.parse::<u32>() {
-                    return Ok(version);
+                    // Validate version is in reasonable range (PostgreSQL 9-25)
+                    if (9..=25).contains(&version) {
+                        return Ok(version);
+                    }
                 }
             }
         }
@@ -1188,7 +1191,13 @@ async fn run_backup(
     // Handle compression based on PostgreSQL version
     if let Some(level) = compress {
         // Get PostgreSQL version to determine compression format
-        let pg_version = get_pg_dump_version().unwrap_or(DEFAULT_PG_VERSION);
+        let pg_version = match get_pg_dump_version() {
+            Ok(version) => version,
+            Err(e) => {
+                eprintln!("Warning: Could not detect PostgreSQL version ({}). Defaulting to PostgreSQL {}.", e, DEFAULT_PG_VERSION);
+                DEFAULT_PG_VERSION
+            }
+        };
         
         if pg_version >= 16 {
             // PostgreSQL 16+ uses new format: --compress=gzip:N
