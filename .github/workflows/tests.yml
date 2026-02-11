@@ -28,9 +28,12 @@ jobs:
         include:
           - component: dlq-redrive
             needs_kafka: true
+          - component: pgsql-migrate
+            needs_db: true
     uses: ./.github/workflows/tests-component-rust.yml
     with:
       force: ${{ github.event.inputs.force || false }}
       component: ${{ matrix.component }}
       needs_kafka: ${{ matrix.needs_kafka || false }}
+      needs_db: ${{ matrix.needs_db || false }}
 

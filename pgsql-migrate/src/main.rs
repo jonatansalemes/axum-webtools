@@ -4,6 +4,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, Row};
 use std::fs;
 use std::path::Path;
+use urlencoding::decode;
 
 #[derive(Parser)]
 #[command(name = "pgsql-migrate")]
@@ -15,100 +16,124 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run migrations up
     #[command(name = "up")]
     Up {
-        /// Path to migrations directory
         #[arg(short = 'p', long = "path", default_value = "migrations")]
         path: String,
 
-        /// Database connection URL
         #[arg(short = 'd', long = "database")]
         database: String,
 
-        /// Environment name (used for skip-on-env feature)
         #[arg(short = 'e', long = "env", default_value = "prod")]
         env: String,
     },
 
-    /// Run migrations down
     #[command(name = "down")]
     Down {
-        /// Path to migrations directory
         #[arg(short = 'p', long = "path", default_value = "migrations")]
         path: String,
 
-        /// Database connection URL
         #[arg(short = 'd', long = "database")]
         database: String,
 
-        /// Environment name (used for skip-on-env feature)
         #[arg(short = 'e', long = "env", default_value = "prod")]
         env: String,
 
-        /// Number of migrations to rollback
         #[arg(default_value = "1")]
         count: u32,
     },
 
-    /// Create a new migration
     #[command(name = "create")]
     Create {
-        /// Directory where migrations are stored
         #[arg(short = 'd', long = "dir", default_value = "migrations")]
         dir: String,
 
-        /// Name of the migration
         #[arg(short = 's', long = "seq")]
         name: String,
     },
 
-    /// Baseline migrations up to a version (mark as applied without running)
     #[command(name = "baseline")]
     Baseline {
-        /// Path to migrations directory
         #[arg(short = 'p', long = "path", default_value = "migrations")]
         path: String,
 
-        /// Database connection URL
         #[arg(short = 'd', long = "database")]
         database: String,
 
-        /// Version to baseline up to (inclusive)
         #[arg(short = 'v', long = "version")]
         version: u32,
     },
 
-    /// Redo the last dirty migration (mark as clean and reapply)
     #[command(name = "redo")]
     Redo {
-        /// Path to migrations directory
         #[arg(short = 'p', long = "path", default_value = "migrations")]
         path: String,
 
-        /// Database connection URL
         #[arg(short = 'd', long = "database")]
         database: String,
 
-        /// Environment name (used for skip-on-env feature)
         #[arg(short = 'e', long = "env", default_value = "prod")]
         env: String,
     },
+    #[command(name = "backup")]
+    Backup {
+        #[arg(short = 'd', long = "database")]
+        database: String,
+
+        #[arg(short = 'o', long = "output")]
+        output: String,
+
+        #[arg(short = 'f', long = "format", default_value = "custom")]
+        format: String,
+
+        #[arg(short = 'c', long = "compress")]
+        compress: Option<u8>,
+
+        #[arg(long = "no-owner")]
+        no_owner: bool,
+
+        #[arg(long = "no-acl")]
+        no_acl: bool,
+    },
+
+    #[command(name = "restore")]
+    Restore {
+        #[arg(short = 'd', long = "database")]
+        database: String,
+
+        #[arg(short = 'i', long = "input")]
+        input: String,
+
+        #[arg(long = "clean")]
+        clean: bool,
+
+        #[arg(long = "create")]
+        create: bool,
+
+        #[arg(long = "no-owner")]
+        no_owner: bool,
+
+        #[arg(long = "no-acl")]
+        no_acl: bool,
+    },
 }
 
-/// Migration features that control execution behavior
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum MigrationFeature {
-    /// Run migration without wrapping in a transaction
-    /// Useful for: CREATE INDEX CONCURRENTLY, CREATE MATERIALIZED VIEW, ALTER TYPE ADD VALUE
+pub enum MigrationFeature {
     NoTransaction,
-    /// Split statements into individual executions using -- split-start and -- split-end markers
     SplitStatements,
 }
 
 impl MigrationFeature {
-    /// Parse a feature from string
-    fn from_str(s: &str) -> Option<Self> {
+    /// Parses a string into a MigrationFeature variant.
+    ///
+    /// # Arguments
+    /// * `s` - String representation of the feature ("no-tx" or "split-statements")
+    ///
+    /// # Returns
+    /// * `Some(MigrationFeature)` if the string matches a valid feature
+    /// * `None` if the string doesn't match any known feature
+    pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
             "no-tx" => Some(MigrationFeature::NoTransaction),
             "split-statements" => Some(MigrationFeature::SplitStatements),
@@ -117,45 +142,54 @@ impl MigrationFeature {
     }
 }
 
-/// Encapsulates the SQL content and features for a migration direction (up or down)
 #[derive(Debug, Clone)]
-struct MigrationSpec {
-    content: String,
-    features: Vec<MigrationFeature>,
+pub struct MigrationSpec {
+    pub content: String,
+    pub features: Vec<MigrationFeature>,
 }
 
 impl MigrationSpec {
-    /// Create a new MigrationSpec, parsing features from the content
-    fn new(content: String) -> Self {
+    /// Creates a new MigrationSpec by parsing content and extracting features.
+    ///
+    /// # Arguments
+    /// * `content` - The SQL migration content to parse
+    pub fn new(content: String) -> Self {
         let features = Self::parse_features(&content);
         Self { content, features }
     }
 
-    /// Create an empty MigrationSpec
-    fn empty() -> Self {
+    /// Creates an empty MigrationSpec with no content or features.
+    pub fn empty() -> Self {
         Self {
             content: String::new(),
             features: Vec::new(),
         }
     }
 
-    /// Check if this spec has the NoTransaction feature
-    fn has_no_tx(&self) -> bool {
+    /// Checks if the no-transaction feature is enabled.
+    ///
+    /// # Returns
+    /// * `true` if the NoTransaction feature is present
+    pub fn has_no_tx(&self) -> bool {
         self.features.contains(&MigrationFeature::NoTransaction)
     }
 
-    /// Check if this spec has the SplitStatements feature
-    fn has_split_statements(&self) -> bool {
+    /// Checks if the split-statements feature is enabled.
+    ///
+    /// # Returns
+    /// * `true` if the SplitStatements feature is present
+    pub fn has_split_statements(&self) -> bool {
         self.features.contains(&MigrationFeature::SplitStatements)
     }
 
-    /// Check if content is empty
-    fn is_empty(&self) -> bool {
+    /// Checks if the migration content is empty.
+    ///
+    /// # Returns
+    /// * `true` if content string is empty
+    pub fn is_empty(&self) -> bool {
         self.content.is_empty()
     }
 
-    /// Parse features from migration file content
-    /// Looks for: -- features: no-tx, other-feature
     fn parse_features(content: &str) -> Vec<MigrationFeature> {
         for line in content.lines() {
             let trimmed = line.trim();
@@ -163,10 +197,9 @@ impl MigrationSpec {
                 let features_str = trimmed.trim_start_matches("-- features:").trim();
                 return features_str
                     .split(',')
-                    .filter_map(MigrationFeature::from_str)
+                    .filter_map(MigrationFeature::parse)
                     .collect();
             }
-            // Stop looking after first non-comment, non-empty line
             if !trimmed.is_empty() && !trimmed.starts_with("--") {
                 break;
             }
@@ -175,16 +208,18 @@ impl MigrationSpec {
     }
 }
 
-/// Represents a parsed migration with its version, filename, and SQL content
-struct Migration {
-    version: u32,
-    filename: String,
-    up: MigrationSpec,
-    down: MigrationSpec,
+pub struct Migration {
+    pub version: u32,
+    pub filename: String,
+    pub up: MigrationSpec,
+    pub down: MigrationSpec,
 }
 
+/// Entry point for the pgsql-migrate CLI tool.
+///
+/// Parses command-line arguments and dispatches to the appropriate subcommand handler.
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -220,13 +255,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             run_redo(&path, &database, &env).await?;
         }
+        Commands::Backup {
+            database,
+            output,
+            format,
+            compress,
+            no_owner,
+            no_acl,
+        } => {
+            run_backup(&database, &output, &format, compress, no_owner, no_acl).await?;
+        }
+        Commands::Restore {
+            database,
+            input,
+            clean,
+            create,
+            no_owner,
+            no_acl,
+        } => {
+            run_restore(&database, &input, clean, create, no_owner, no_acl).await?;
+        }
     }
 
     Ok(())
 }
 
-/// Normalize name: lowercase, replace spaces with underscores, keep only alphanumeric and underscores
-fn normalize_name(name: &str) -> String {
+/// Normalizes a migration name by converting to lowercase and replacing invalid characters.
+///
+/// # Arguments
+/// * `name` - The migration name to normalize
+///
+/// # Returns
+/// * A normalized string containing only lowercase alphanumeric characters and underscores
+pub fn normalize_name(name: &str) -> String {
     name.to_lowercase()
         .chars()
         .map(|c| if c == ' ' { '_' } else { c })
@@ -234,8 +295,14 @@ fn normalize_name(name: &str) -> String {
         .collect()
 }
 
-/// Get the next migration version based on existing files
-fn get_next_version(dir: &Path) -> Result<u32, Box<dyn std::error::Error>> {
+/// Determines the next migration version number by scanning existing migrations.
+///
+/// # Arguments
+/// * `dir` - Path to the migrations directory
+///
+/// # Returns
+/// * The next sequential version number (highest existing version + 1)
+pub fn get_next_version(dir: &Path) -> Result<u32, Box<dyn std::error::Error>> {
     if !dir.exists() {
         return Ok(1);
     }
@@ -247,7 +314,6 @@ fn get_next_version(dir: &Path) -> Result<u32, Box<dyn std::error::Error>> {
         let file_name = entry.file_name();
         let name = file_name.to_string_lossy();
 
-        // Parse version from filename like "000001_name.up.sql"
         if let Some(version_str) = name.split('_').next() {
             if let Ok(version) = version_str.parse::<u32>() {
                 max_version = max_version.max(version);
@@ -258,11 +324,17 @@ fn get_next_version(dir: &Path) -> Result<u32, Box<dyn std::error::Error>> {
     Ok(max_version + 1)
 }
 
-/// Create a new migration file pair
-fn create_migration(dir: &str, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// Creates a new migration pair (up and down files) in the specified directory.
+///
+/// # Arguments
+/// * `dir` - Directory path where migration files will be created
+/// * `name` - Name of the migration (will be normalized)
+///
+/// # Returns
+/// * `Ok(())` on success, or an error if file creation fails
+pub fn create_migration(dir: &str, name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let dir_path = Path::new(dir);
 
-    // Create directory if it doesn't exist
     if !dir_path.exists() {
         fs::create_dir_all(dir_path)?;
         println!("Created migrations directory: {}", dir);
@@ -287,33 +359,48 @@ fn create_migration(dir: &str, name: &str) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-/// Compute SHA256 hash of content
-fn compute_hash(content: &str) -> String {
+/// Computes a SHA-256 hash of the given content.
+///
+/// # Arguments
+/// * `content` - The content to hash
+///
+/// # Returns
+/// * A hexadecimal string representation of the SHA-256 hash
+pub fn compute_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
-/// Represents a SQL block with optional skip-on-env environments
 #[derive(Debug, Clone)]
-struct SqlBlock {
-    content: String,
-    skip_on_env: Vec<String>,
+pub struct SqlBlock {
+    pub content: String,
+    pub skip_on_env: Vec<String>,
 }
 
 impl SqlBlock {
-    /// Check if this block should be skipped based on the current environment
-    fn should_skip(&self, current_env: &str) -> bool {
+    /// Determines if this SQL block should be skipped for the given environment.
+    ///
+    /// # Arguments
+    /// * `current_env` - The current environment name to check against
+    ///
+    /// # Returns
+    /// * `true` if the block should be skipped for the current environment
+    pub fn should_skip(&self, current_env: &str) -> bool {
         self.skip_on_env
             .iter()
             .any(|e| e.eq_ignore_ascii_case(current_env))
     }
 }
 
-/// Split SQL content into blocks using -- split-start and -- split-end markers
-/// Each block can optionally have a -- skip-on-env directive to skip it on certain environments
-/// Returns an error if markers are mismatched (start without end, end without start, or unclosed block)
-fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
+/// Splits SQL content into blocks delimited by split-start and split-end markers.
+///
+/// # Arguments
+/// * `content` - The SQL content to split
+///
+/// # Returns
+/// * A vector of SqlBlock instances, or an error if markers are mismatched
+pub fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
     let mut blocks = Vec::new();
     let mut current_block = String::new();
     let mut current_skip_envs: Vec<String> = Vec::new();
@@ -322,7 +409,7 @@ fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
 
     for (line_num, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        let line_number = line_num + 1; // 1-based line numbers
+        let line_number = line_num + 1;
 
         if trimmed == "-- split-start" {
             if in_block {
@@ -345,7 +432,6 @@ fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
                     line_number
                 ));
             }
-            // Save the block
             let block_content = current_block.trim().to_string();
             if !block_content.is_empty() {
                 blocks.push(SqlBlock {
@@ -360,7 +446,6 @@ fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
         }
 
         if in_block {
-            // Check for skip-on-env directive inside the block
             if trimmed.starts_with("-- skip-on-env") {
                 let envs_str = trimmed.trim_start_matches("-- skip-on-env").trim();
                 current_skip_envs = envs_str
@@ -368,7 +453,6 @@ fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
                     .map(|e| e.trim().to_lowercase())
                     .filter(|e| !e.is_empty())
                     .collect();
-                // Don't add this line to the block content
                 continue;
             }
 
@@ -379,7 +463,6 @@ fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
         }
     }
 
-    // Check for unclosed block
     if in_block {
         return Err(format!(
             "Block starting at line {} was not closed with '-- split-end'",
@@ -396,8 +479,14 @@ fn split_sql_by_markers(content: &str) -> Result<Vec<SqlBlock>, String> {
     Ok(blocks)
 }
 
-/// Ensure schema_migrations table exists
-async fn ensure_schema_migrations_table(
+/// Ensures the schema migrations table exists in the database.
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+///
+/// # Returns
+/// * `Ok(())` if table exists or was created successfully
+pub async fn ensure_schema_migrations_table(
     pool: &sqlx::PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     pool.execute(
@@ -414,8 +503,14 @@ async fn ensure_schema_migrations_table(
     Ok(())
 }
 
-/// Get applied migrations
-async fn get_applied_migrations(
+/// Retrieves all applied migrations from the database.
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+///
+/// # Returns
+/// * A vector of tuples containing (version, dirty flag, content hash)
+pub async fn get_applied_migrations(
     pool: &sqlx::PgPool,
 ) -> Result<Vec<(i64, bool, Option<String>)>, Box<dyn std::error::Error>> {
     let rows = sqlx::query(
@@ -438,8 +533,14 @@ async fn get_applied_migrations(
     Ok(migrations)
 }
 
-/// Check if there are dirty migrations
-async fn check_dirty_migrations(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
+/// Checks for dirty migrations and returns an error if any are found.
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+///
+/// # Returns
+/// * `Ok(())` if no dirty migrations exist, or an error if any are found
+pub async fn check_dirty_migrations(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
     let applied = get_applied_migrations(pool).await?;
     for (version, dirty, _) in applied {
         if dirty {
@@ -453,8 +554,14 @@ async fn check_dirty_migrations(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-/// Get current migration version
-async fn get_current_version(
+/// Gets the current highest migration version from the database.
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+///
+/// # Returns
+/// * `Some(version)` if migrations exist, `None` otherwise
+pub async fn get_current_version(
     pool: &sqlx::PgPool,
 ) -> Result<Option<i64>, Box<dyn std::error::Error>> {
     let result =
@@ -466,8 +573,11 @@ async fn get_current_version(
     Ok(version)
 }
 
-/// Print current version
-async fn print_current_version(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
+/// Prints the current migration version to stdout.
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+pub async fn print_current_version(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
     match get_current_version(pool).await? {
         Some(version) => println!("Current version: {}", version),
         None => println!("Current version: None (no migrations applied)"),
@@ -475,8 +585,14 @@ async fn print_current_version(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-/// Parse migration files from directory
-fn parse_migrations(dir: &Path) -> Result<Vec<Migration>, Box<dyn std::error::Error>> {
+/// Parses all migration files from the specified directory.
+///
+/// # Arguments
+/// * `dir` - Path to the migrations directory
+///
+/// # Returns
+/// * A sorted vector of Migration instances
+pub fn parse_migrations(dir: &Path) -> Result<Vec<Migration>, Box<dyn std::error::Error>> {
     let mut migrations: Vec<Migration> = Vec::new();
 
     if !dir.exists() {
@@ -528,8 +644,20 @@ fn parse_migrations(dir: &Path) -> Result<Vec<Migration>, Box<dyn std::error::Er
     Ok(migrations)
 }
 
-/// Run migrations up
-async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// Runs pending up migrations against the database.
+///
+/// # Arguments
+/// * `path` - Path to the migrations directory
+/// * `database` - Database connection URL
+/// * `env` - Environment name for conditional migration execution
+///
+/// # Returns
+/// * `Ok(())` if all migrations applied successfully
+pub async fn run_up(
+    path: &str,
+    database: &str,
+    env: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running migrations in environment: {}", env);
     let pool = PgPoolOptions::new()
         .max_connections(1)
@@ -552,9 +680,7 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
         let version_i64 = migration.version as i64;
         let current_hash = compute_hash(&migration.up.content);
 
-        // Check if migration was already applied
         if let Some(stored_hash) = applied_map.get(&version_i64) {
-            // Check if content hash differs
             if let Some(ref hash) = stored_hash {
                 if hash != &current_hash {
                     eprintln!(
@@ -570,18 +696,15 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
 
         println!("Applying migration: {}", migration.filename);
 
-        // Mark as dirty before applying
         sqlx::query("INSERT INTO pgsql_migrate_schema_migrations (version, dirty, content_hash) VALUES ($1, TRUE, $2)")
             .bind(version_i64)
             .bind(&current_hash)
             .execute(&pool)
             .await?;
 
-        // Check if migration should run without transaction
         let use_transaction = !migration.up.has_no_tx();
         let use_split = migration.up.has_split_statements();
 
-        // Print feature info
         if !use_transaction {
             println!("  (running without transaction due to no-tx feature)");
         }
@@ -590,12 +713,10 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
         }
 
         let result: Result<(), Box<dyn std::error::Error>> = if use_split {
-            // Split by markers and execute each block
             match split_sql_by_markers(&migration.up.content) {
                 Ok(blocks) => {
                     let mut exec_result: Result<(), Box<dyn std::error::Error>> = Ok(());
                     for (i, block) in blocks.iter().enumerate() {
-                        // Check if block should be skipped based on environment
                         if block.should_skip(env) {
                             println!(
                                 "  Skipping block {} (skip-on-env: {} matches current env: {})",
@@ -607,7 +728,6 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
                         }
 
                         if use_transaction {
-                            // Each block in its own transaction
                             let mut tx = pool.begin().await?;
                             match tx.execute(block.content.as_str()).await {
                                 Ok(_) => {
@@ -620,7 +740,6 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
                                 }
                             }
                         } else {
-                            // Execute without transaction
                             match pool.execute(block.content.as_str()).await {
                                 Ok(_) => {}
                                 Err(e) => {
@@ -636,7 +755,6 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
                 Err(e) => Err(format!("Failed to parse split markers: {}", e).into()),
             }
         } else if use_transaction {
-            // Apply migration inside a transaction
             let mut tx = pool.begin().await?;
             match tx.execute(migration.up.content.as_str()).await {
                 Ok(_) => {
@@ -646,7 +764,6 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
                 Err(e) => Err(e.into()),
             }
         } else {
-            // Apply migration without transaction (single execution)
             pool.execute(migration.up.content.as_str())
                 .await
                 .map(|_| ())
@@ -655,7 +772,6 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
 
         match result {
             Ok(_) => {
-                // Mark as clean
                 sqlx::query(
                     "UPDATE pgsql_migrate_schema_migrations SET dirty = FALSE WHERE version = $1",
                 )
@@ -685,8 +801,17 @@ async fn run_up(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std
     Ok(())
 }
 
-/// Run migrations down
-async fn run_down(
+/// Rolls back the specified number of migrations.
+///
+/// # Arguments
+/// * `path` - Path to the migrations directory
+/// * `database` - Database connection URL
+/// * `env` - Environment name for conditional migration execution
+/// * `count` - Number of migrations to roll back
+///
+/// # Returns
+/// * `Ok(())` if all rollbacks completed successfully
+pub async fn run_down(
     path: &str,
     database: &str,
     env: &str,
@@ -711,7 +836,6 @@ async fn run_down(
     let migration_map: std::collections::HashMap<u32, Migration> =
         migrations.into_iter().map(|m| (m.version, m)).collect();
 
-    // Get versions to rollback (from newest to oldest)
     let mut versions_to_rollback: Vec<i64> = applied.iter().map(|(v, _, _)| *v).collect();
     versions_to_rollback.reverse();
     versions_to_rollback.truncate(count as usize);
@@ -728,7 +852,6 @@ async fn run_down(
                 continue;
             }
 
-            // Mark as dirty before rollback
             sqlx::query(
                 "UPDATE pgsql_migrate_schema_migrations SET dirty = TRUE WHERE version = $1",
             )
@@ -736,11 +859,9 @@ async fn run_down(
             .execute(&pool)
             .await?;
 
-            // Check if migration should run without transaction
             let use_transaction = !migration.down.has_no_tx();
             let use_split = migration.down.has_split_statements();
 
-            // Print feature info
             if !use_transaction {
                 println!("  (running without transaction due to no-tx feature)");
             }
@@ -749,12 +870,10 @@ async fn run_down(
             }
 
             let result: Result<(), Box<dyn std::error::Error>> = if use_split {
-                // Split by markers and execute each block
                 match split_sql_by_markers(&migration.down.content) {
                     Ok(blocks) => {
                         let mut exec_result: Result<(), Box<dyn std::error::Error>> = Ok(());
                         for (i, block) in blocks.iter().enumerate() {
-                            // Check if block should be skipped based on environment
                             if block.should_skip(env) {
                                 println!(
                                     "  Skipping block {} (skip-on-env: {} matches current env: {})",
@@ -766,7 +885,6 @@ async fn run_down(
                             }
 
                             if use_transaction {
-                                // Each block in its own transaction
                                 let mut tx = pool.begin().await?;
                                 match tx.execute(block.content.as_str()).await {
                                     Ok(_) => {
@@ -779,7 +897,6 @@ async fn run_down(
                                     }
                                 }
                             } else {
-                                // Execute without transaction
                                 match pool.execute(block.content.as_str()).await {
                                     Ok(_) => {}
                                     Err(e) => {
@@ -795,7 +912,6 @@ async fn run_down(
                     Err(e) => Err(format!("Failed to parse split markers: {}", e).into()),
                 }
             } else if use_transaction {
-                // Apply down migration inside a transaction
                 let mut tx = pool.begin().await?;
                 match tx.execute(migration.down.content.as_str()).await {
                     Ok(_) => {
@@ -805,7 +921,6 @@ async fn run_down(
                     Err(e) => Err(e.into()),
                 }
             } else {
-                // Apply migration without transaction (single execution)
                 pool.execute(migration.down.content.as_str())
                     .await
                     .map(|_| ())
@@ -814,7 +929,6 @@ async fn run_down(
 
             match result {
                 Ok(_) => {
-                    // Remove from pgsql_migrate_schema_migrations
                     sqlx::query("DELETE FROM pgsql_migrate_schema_migrations WHERE version = $1")
                         .bind(version)
                         .execute(&pool)
@@ -850,8 +964,16 @@ async fn run_down(
     Ok(())
 }
 
-/// Run baseline up to a specific version (mark all migrations as applied without running them)
-async fn run_baseline(
+/// Baselines the database by marking migrations as applied without executing them.
+///
+/// # Arguments
+/// * `path` - Path to the migrations directory
+/// * `database` - Database connection URL
+/// * `target_version` - Version up to which migrations should be baselined
+///
+/// # Returns
+/// * `Ok(())` if baseline completed successfully
+pub async fn run_baseline(
     path: &str,
     database: &str,
     target_version: u32,
@@ -883,7 +1005,6 @@ async fn run_baseline(
     for migration in migrations_to_baseline {
         let version_i64 = migration.version as i64;
 
-        // Skip if already applied
         if applied_versions.contains(&version_i64) {
             println!("Skipping already applied migration: {}", migration.filename);
             continue;
@@ -915,8 +1036,20 @@ async fn run_baseline(
     Ok(())
 }
 
-/// Redo the last dirty migration (mark as clean and reapply)
-async fn run_redo(path: &str, database: &str, env: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// Redoes dirty migrations by removing them from the tracking table and re-applying.
+///
+/// # Arguments
+/// * `path` - Path to the migrations directory
+/// * `database` - Database connection URL
+/// * `env` - Environment name for conditional migration execution
+///
+/// # Returns
+/// * `Ok(())` if redo completed successfully
+pub async fn run_redo(
+    path: &str,
+    database: &str,
+    env: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database)
@@ -924,7 +1057,6 @@ async fn run_redo(path: &str, database: &str, env: &str) -> Result<(), Box<dyn s
 
     ensure_schema_migrations_table(&pool).await?;
 
-    // Find the last dirty migration
     let applied = get_applied_migrations(&pool).await?;
     let dirty_migration = applied
         .iter()
@@ -941,14 +1073,561 @@ async fn run_redo(path: &str, database: &str, env: &str) -> Result<(), Box<dyn s
 
     println!("Redoing migration version: {}", version);
 
-    // Mark as clean (not dirty) and delete from schema to allow run_up to reapply it
     sqlx::query("DELETE FROM pgsql_migrate_schema_migrations WHERE version = $1")
         .bind(version)
         .execute(&pool)
         .await?;
 
-    // Call run_up to reapply the migration
     run_up(path, database, env).await?;
 
     Ok(())
+}
+
+/// Parses a PostgreSQL connection URL into its components.
+///
+/// # Arguments
+/// * `url` - PostgreSQL connection URL (postgres:// or postgresql://)
+///
+/// # Returns
+/// * A PgConnectionInfo struct with parsed connection details
+pub fn parse_pg_url(url: &str) -> Result<PgConnectionInfo, Box<dyn std::error::Error>> {
+    let url = url
+        .strip_prefix("postgresql://")
+        .or_else(|| url.strip_prefix("postgres://"))
+        .ok_or("Invalid PostgreSQL URL: must start with postgresql:// or postgres://")?;
+
+    let (auth_host, db_params) = url.split_once('/').unwrap_or((url, ""));
+    let (db_name, _params) = db_params.split_once('?').unwrap_or((db_params, ""));
+
+    let (auth, host_port) = if let Some((a, h)) = auth_host.rsplit_once('@') {
+        (Some(a), h)
+    } else {
+        (None, auth_host)
+    };
+
+    let (user, password) = if let Some(auth_str) = auth {
+        let (u, p) = auth_str.split_once(':').unwrap_or((auth_str, ""));
+        (
+            Some(
+                decode(u)
+                    .map_err(|e| format!("Invalid UTF-8 in username after URL decoding: {}", e))?
+                    .into_owned(),
+            ),
+            if p.is_empty() {
+                None
+            } else {
+                Some(
+                    decode(p)
+                        .map_err(|e| {
+                            format!("Invalid UTF-8 in password after URL decoding: {}", e)
+                        })?
+                        .into_owned(),
+                )
+            },
+        )
+    } else {
+        (None, None)
+    };
+
+    let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
+        (h.to_string(), Some(p.to_string()))
+    } else {
+        (host_port.to_string(), None)
+    };
+
+    Ok(PgConnectionInfo {
+        host: if host.is_empty() {
+            "localhost".to_string()
+        } else {
+            host
+        },
+        port: port.unwrap_or_else(|| "5432".to_string()),
+        user: user.unwrap_or_else(|| "postgres".to_string()),
+        password,
+        database: if db_name.is_empty() {
+            "postgres".to_string()
+        } else {
+            decode(db_name)
+                .map_err(|e| format!("Invalid UTF-8 in database name after URL decoding: {}", e))?
+                .into_owned()
+        },
+    })
+}
+
+#[derive(Debug)]
+pub struct PgConnectionInfo {
+    pub host: String,
+    pub port: String,
+    pub user: String,
+    pub password: Option<String>,
+    pub database: String,
+}
+
+const DEFAULT_PG_VERSION: u32 = 15;
+
+/// Checks if a command exists in the system PATH.
+///
+/// # Arguments
+/// * `cmd` - Command name to check
+///
+/// # Returns
+/// * `true` if the command exists, `false` otherwise
+pub fn command_exists(cmd: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// Retrieves the major version number of the installed pg_dump tool.
+///
+/// # Returns
+/// * The major version number (e.g., 15 for PostgreSQL 15.x)
+pub fn get_pg_dump_version() -> Result<u32, Box<dyn std::error::Error>> {
+    let output = std::process::Command::new("pg_dump")
+        .arg("--version")
+        .output()?;
+
+    let version_str = String::from_utf8(output.stdout)?;
+
+    for token in version_str.split_whitespace() {
+        if token.chars().next().is_some_and(|c| c.is_ascii_digit()) && token.contains('.') {
+            if let Some(major_version_str) = token.split('.').next() {
+                if let Ok(version) = major_version_str.parse::<u32>() {
+                    if (9..=99).contains(&version) {
+                        return Ok(version);
+                    }
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Could not parse pg_dump version from output: {}",
+        version_str.trim()
+    )
+    .into())
+}
+
+/// Creates a database backup using pg_dump.
+///
+/// # Arguments
+/// * `database` - Database connection URL
+/// * `output` - Output file path for the backup
+/// * `format` - Backup format (plain, custom, directory, or tar)
+/// * `compress` - Optional compression level (0-9)
+/// * `no_owner` - Exclude ownership information
+/// * `no_acl` - Exclude ACL information
+///
+/// # Returns
+/// * `Ok(())` if backup completed successfully
+pub async fn run_backup(
+    database: &str,
+    output: &str,
+    format: &str,
+    compress: Option<u8>,
+    no_owner: bool,
+    no_acl: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !command_exists("pg_dump") {
+        return Err("pg_dump command not found. Please install PostgreSQL client tools. Example: sudo apt update && sudo apt install postgresql-client-16".into());
+    }
+
+    println!("Creating backup of database...");
+
+    let conn_info = parse_pg_url(database)?;
+
+    let format_flag = match format.to_lowercase().as_str() {
+        "plain" | "p" => "p",
+        "custom" | "c" => "c",
+        "directory" | "d" => "d",
+        "tar" | "t" => "t",
+        _ => {
+            return Err(format!(
+                "Invalid format '{}'. Use: plain, custom, directory, or tar",
+                format
+            )
+            .into())
+        }
+    };
+
+    if let Some(level) = compress {
+        if level > 9 {
+            return Err("Compression level must be between 0 and 9".into());
+        }
+        if format_flag == "p" {
+            return Err("Compression is not supported for plain format".into());
+        }
+    }
+
+    let mut cmd = tokio::process::Command::new("pg_dump");
+
+    cmd.arg("--host")
+        .arg(&conn_info.host)
+        .arg("--port")
+        .arg(&conn_info.port)
+        .arg("--username")
+        .arg(&conn_info.user)
+        .arg("--format")
+        .arg(format_flag)
+        .arg("--file")
+        .arg(output)
+        .arg("--verbose");
+
+    if let Some(level) = compress {
+        let pg_version = match get_pg_dump_version() {
+            Ok(version) => version,
+            Err(e) => {
+                eprintln!("Warning: Could not detect PostgreSQL version ({}). Defaulting to PostgreSQL {}.", e, DEFAULT_PG_VERSION);
+                DEFAULT_PG_VERSION
+            }
+        };
+
+        if pg_version >= 16 {
+            cmd.arg(format!("--compress=gzip:{}", level));
+        } else {
+            cmd.arg("--compress").arg(level.to_string());
+        }
+    }
+
+    if no_owner {
+        cmd.arg("--no-owner");
+    }
+
+    if no_acl {
+        cmd.arg("--no-acl");
+    }
+
+    cmd.arg(&conn_info.database);
+
+    if let Some(ref password) = conn_info.password {
+        cmd.env("PGPASSWORD", password);
+    }
+
+    let mut cmd_str = format!(
+        "Running: pg_dump --host {} --port {} --username {} --dbname {} --format {} --file {}",
+        conn_info.host, conn_info.port, conn_info.user, conn_info.database, format, output
+    );
+    if let Some(level) = compress {
+        cmd_str.push_str(&format!(" --compress {}", level));
+    }
+    if no_owner {
+        cmd_str.push_str(" --no-owner");
+    }
+    if no_acl {
+        cmd_str.push_str(" --no-acl");
+    }
+    println!("{}", cmd_str);
+
+    let output_result = cmd.output().await?;
+
+    if output_result.status.success() {
+        println!("✓ Backup created successfully: {}", output);
+        println!("  Format: {}", format);
+        if let Some(level) = compress {
+            println!("  Compression: level {}", level);
+        }
+        if no_owner {
+            println!("  No ownership information");
+        }
+        if no_acl {
+            println!("  No ACL information");
+        }
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output_result.stderr);
+        Err(format!("pg_dump failed:\n{}", stderr).into())
+    }
+}
+
+/// Restores a database from a backup file using pg_restore or psql.
+///
+/// # Arguments
+/// * `database` - Database connection URL
+/// * `input` - Input backup file path
+/// * `clean` - Drop database objects before recreating them
+/// * `create` - Create the database before restoring
+/// * `no_owner` - Skip restoration of ownership
+/// * `no_acl` - Skip restoration of access privileges
+///
+/// # Returns
+/// * `Ok(())` if restore completed successfully
+pub async fn run_restore(
+    database: &str,
+    input: &str,
+    clean: bool,
+    create: bool,
+    no_owner: bool,
+    no_acl: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Restoring database from backup...");
+
+    let conn_info = parse_pg_url(database)?;
+
+    if !Path::new(input).exists() {
+        return Err(format!("Backup file not found: {}", input).into());
+    }
+
+    let is_plain_sql = input.ends_with(".sql") || is_plain_sql_file(input)?;
+
+    let output_result = if is_plain_sql {
+        println!("Detected plain SQL format, using psql...");
+
+        if !command_exists("psql") {
+            return Err("psql command not found. Please install PostgreSQL client tools. Example: sudo apt update && sudo apt install postgresql-client-16".into());
+        }
+
+        if no_owner || no_acl {
+            println!(
+                "  Warning: --no-owner and --no-acl flags are not supported for plain SQL format"
+            );
+        }
+
+        let mut cmd = tokio::process::Command::new("psql");
+
+        cmd.arg("--host")
+            .arg(&conn_info.host)
+            .arg("--port")
+            .arg(&conn_info.port)
+            .arg("--username")
+            .arg(&conn_info.user)
+            .arg("--dbname")
+            .arg(&conn_info.database)
+            .arg("--file")
+            .arg(input);
+
+        if let Some(ref password) = conn_info.password {
+            cmd.env("PGPASSWORD", password);
+        }
+
+        println!(
+            "Running: psql --host {} --port {} --username {} --dbname {} --file {}",
+            conn_info.host, conn_info.port, conn_info.user, conn_info.database, input
+        );
+
+        cmd.output().await?
+    } else {
+        println!("Detected custom/directory/tar format, using pg_restore...");
+
+        if !command_exists("pg_restore") {
+            return Err("pg_restore command not found. Please install PostgreSQL client tools. Example: sudo apt update && sudo apt install postgresql-client-16".into());
+        }
+
+        let mut cmd = tokio::process::Command::new("pg_restore");
+
+        cmd.arg("--host")
+            .arg(&conn_info.host)
+            .arg("--port")
+            .arg(&conn_info.port)
+            .arg("--username")
+            .arg(&conn_info.user)
+            .arg("--dbname")
+            .arg(&conn_info.database)
+            .arg("--verbose");
+
+        if clean {
+            cmd.arg("--clean");
+        }
+
+        if create {
+            cmd.arg("--create");
+        }
+
+        if no_owner {
+            cmd.arg("--no-owner");
+        }
+
+        if no_acl {
+            cmd.arg("--no-acl");
+        }
+
+        cmd.arg(input);
+
+        if let Some(ref password) = conn_info.password {
+            cmd.env("PGPASSWORD", password);
+        }
+
+        println!(
+            "Running: pg_restore --host {} --port {} --username {} --dbname {} {}{}{}{}{}",
+            conn_info.host,
+            conn_info.port,
+            conn_info.user,
+            conn_info.database,
+            if clean { "--clean " } else { "" },
+            if create { "--create " } else { "" },
+            if no_owner { "--no-owner " } else { "" },
+            if no_acl { "--no-acl " } else { "" },
+            input
+        );
+
+        cmd.output().await?
+    };
+
+    if output_result.status.success() {
+        println!("✓ Database restored successfully from: {}", input);
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output_result.stderr);
+        let stdout = String::from_utf8_lossy(&output_result.stdout);
+
+        if stderr.contains("ERROR") || stderr.contains("FATAL") {
+            Err(format!("Restore failed:\nSTDERR:\n{}\nSTDOUT:\n{}", stderr, stdout).into())
+        } else {
+            println!("✓ Database restored successfully from: {}", input);
+            if !stderr.is_empty() {
+                println!("Warnings:\n{}", stderr);
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Checks if a file is plain SQL by reading the first few bytes.
+///
+/// # Arguments
+/// * `path` - Path to the file to check
+///
+/// # Returns
+/// * `true` if the file appears to be plain SQL, `false` otherwise
+pub fn is_plain_sql_file(path: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = [0u8; 8];
+    use std::io::Read;
+    let bytes_read = file.read(&mut buffer)?;
+
+    if bytes_read == 0 {
+        return Ok(true);
+    }
+
+    let is_custom = bytes_read >= 5 && &buffer[0..5] == b"PGDMP";
+    let is_text = buffer[0..bytes_read]
+        .iter()
+        .all(|&b| b.is_ascii() || b == b'\n' || b == b'\r' || b == b'\t');
+
+    Ok(!is_custom && is_text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::distr::{Alphanumeric, SampleString};
+
+    fn random_string(prefix: &str) -> String {
+        let random_suffix = Alphanumeric.sample_string(&mut rand::rng(), 8);
+        format!("{}-{}", prefix, random_suffix)
+    }
+
+    fn get_database_url() -> String {
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://pgsqlmigrate:pgsqlmigrate@pgsql:5432/pgsqlmigrate".to_string()
+        })
+    }
+
+    #[tokio::test]
+    async fn test_backup() -> Result<(), Box<dyn std::error::Error>> {
+        let database_url = get_database_url();
+        let backup_file = random_string("backup") + ".backup";
+        run_backup(&database_url, &backup_file, "custom", Some(9), true, true).await?;
+        assert!(
+            Path::new(&backup_file).exists(),
+            "Backup file was not created"
+        );
+        fs::remove_file(&backup_file)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_create_migration() -> Result<(), Box<dyn std::error::Error>> {
+        let migration_name = random_string("migration_");
+        let dir = "migrations";
+        let version = get_next_version(Path::new(dir))?;
+        let normalized_name = normalize_name(&migration_name);
+        create_migration(dir, &migration_name)?;
+        let expected_up = format!("{}/{:06}_{}.up.sql", dir, version, normalized_name);
+        let expected_down = format!("{}/{:06}_{}.down.sql", dir, version, normalized_name);
+        assert!(
+            Path::new(&expected_up).exists(),
+            "Up migration file was not created"
+        );
+        assert!(
+            Path::new(&expected_down).exists(),
+            "Down migration file was not created"
+        );
+        fs::remove_file(&expected_up)?;
+        fs::remove_file(&expected_down)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_basic() -> Result<(), Box<dyn std::error::Error>> {
+        let url = "postgresql://user:pass@localhost:5432/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "user");
+        assert_eq!(info.password, Some("pass".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_encoded_password() -> Result<(), Box<dyn std::error::Error>> {
+        let url = "postgresql://user:p%40ss@localhost:5432/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "user");
+        assert_eq!(info.password, Some("p@ss".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_encoded_username() -> Result<(), Box<dyn std::error::Error>> {
+        let url = "postgresql://us%40er:pass@localhost:5432/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "us@er");
+        assert_eq!(info.password, Some("pass".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_special_chars() -> Result<(), Box<dyn std::error::Error>> {
+        let url = "postgresql://user:p%40ss%3Aword%2Ftest%3Fquery@localhost:5432/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "user");
+        assert_eq!(info.password, Some("p@ss:word/test?query".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_defaults() -> Result<(), Box<dyn std::error::Error>> {
+        let url = "postgresql://localhost/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "postgres");
+        assert_eq!(info.password, None);
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_encoded_database() -> Result<(), Box<dyn std::error::Error>> {
+        let url = "postgresql://user:pass@localhost:5432/my%2Ddb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "user");
+        assert_eq!(info.password, Some("pass".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "my-db");
+        Ok(())
+    }
 }

@@ -12,6 +12,11 @@ on:
         type: boolean
         required: false
         default: false
+      needs_db:
+        description: Whether to start PostgreSQL service
+        type: boolean
+        required: false
+        default: false
       force:
         description: Force run tests even if no changes detected
         type: boolean
@@ -52,6 +57,21 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
+      - name: Start PostgreSQL
+        if: inputs.needs_db
+        run: |
+          docker run -d \
+            --name pgsql \
+            -e POSTGRES_USER=pgsqlmigrate \
+            -e POSTGRES_PASSWORD=pgsqlmigrate \
+            -e POSTGRES_DB=pgsqlmigrate \
+            -p 5432:5432 \
+            --health-cmd pg_isready \
+            --health-interval 10s \
+            --health-timeout 5s \
+            --health-retries 5 \
+            postgres:16-alpine
+
       - name: Start Kafka
         if: inputs.needs_kafka
         run: |
@@ -76,7 +96,7 @@ jobs:
             confluentinc/cp-kafka:8.0.0
 
       - name: Wait for services to be healthy
-        if: inputs.needs_kafka
+        if: inputs.needs_db || inputs.needs_kafka
         run: |
           echo "Waiting for services to be ready..."
 
@@ -101,6 +121,7 @@ jobs:
           }
 
           ${{ inputs.needs_kafka == true && 'wait_for_service kafka' || ':' }}
+          ${{ inputs.needs_db == true && 'wait_for_service pgsql' || ':' }}
          
           echo "All required services are ready!"
 
@@ -131,4 +152,5 @@ jobs:
         working-directory: ./${{ inputs.component }}
         env:
           KAFKA_BROKERS: localhost:9092
+          DATABASE_URL: postgres://pgsqlmigrate:pgsqlmigrate@localhost:5432/pgsqlmigrate
         run: cargo test --verbose

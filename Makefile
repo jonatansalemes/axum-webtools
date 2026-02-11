@@ -15,8 +15,11 @@ update-deps: ## [Dev] Update dependencies
 sync-deps: ## [Dev] Sync dependencies
 	@docker compose run --rm --no-deps task sh -c 'rm -f Cargo.lock && cargo update'
 
-test: ## [Dev] Run tests
+test: ## [Dev] Run tests for all packages
 	@docker compose run --rm task sh -c 'cargo test --all-features'
+
+test-pgsql-migrate: ## [Dev] Run tests for pgsql-migrate package
+	@docker compose run --rm task sh -c 'cargo test --package axum-webtools-pgsql-migrate --all-features'
 
 format: ## [Dev] Format code
 	@docker compose run --rm --no-deps task sh -c 'cargo fmt --all'
