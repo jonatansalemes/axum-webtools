@@ -1091,6 +1091,9 @@ struct PgConnectionInfo {
     database: String,
 }
 
+/// Default PostgreSQL version to assume if version detection fails
+const DEFAULT_PG_VERSION: u32 = 15;
+
 /// Check if a command exists in PATH
 fn command_exists(cmd: &str) -> bool {
     std::process::Command::new("which")
@@ -1109,16 +1112,19 @@ fn get_pg_dump_version() -> Result<u32, Box<dyn std::error::Error>> {
     let version_str = String::from_utf8(output.stdout)?;
     
     // Parse version string like "pg_dump (PostgreSQL) 16.1"
-    let version = version_str
-        .split_whitespace()
-        .nth(2)
-        .ok_or("Could not parse pg_dump version")?
-        .split('.')
-        .next()
-        .ok_or("Could not extract major version")?
-        .parse::<u32>()?;
+    // Use regex-like approach to find the version number pattern
+    for token in version_str.split_whitespace() {
+        // Look for a token that starts with a digit and contains a dot
+        if token.chars().next().map_or(false, |c| c.is_ascii_digit()) && token.contains('.') {
+            if let Some(major_version_str) = token.split('.').next() {
+                if let Ok(version) = major_version_str.parse::<u32>() {
+                    return Ok(version);
+                }
+            }
+        }
+    }
     
-    Ok(version)
+    Err(format!("Could not parse pg_dump version from output: {}", version_str.trim()).into())
 }
 
 /// Create a database backup using pg_dump
@@ -1182,7 +1188,7 @@ async fn run_backup(
     // Handle compression based on PostgreSQL version
     if let Some(level) = compress {
         // Get PostgreSQL version to determine compression format
-        let pg_version = get_pg_dump_version().unwrap_or(15); // Default to 15 if version detection fails
+        let pg_version = get_pg_dump_version().unwrap_or(DEFAULT_PG_VERSION);
         
         if pg_version >= 16 {
             // PostgreSQL 16+ uses new format: --compress=gzip:N
