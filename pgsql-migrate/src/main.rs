@@ -1118,8 +1118,8 @@ fn get_pg_dump_version() -> Result<u32, Box<dyn std::error::Error>> {
         if token.chars().next().map_or(false, |c| c.is_ascii_digit()) && token.contains('.') {
             if let Some(major_version_str) = token.split('.').next() {
                 if let Ok(version) = major_version_str.parse::<u32>() {
-                    // Validate version is in reasonable range (PostgreSQL 9-25)
-                    if (9..=25).contains(&version) {
+                    // Validate version is in reasonable range (PostgreSQL 9-99)
+                    if (9..=99).contains(&version) {
                         return Ok(version);
                     }
                 }
