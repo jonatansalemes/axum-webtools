@@ -1144,7 +1144,7 @@ async fn run_backup(
     }
 
     // Build pg_dump command
-    let mut cmd = std::process::Command::new("pg_dump");
+    let mut cmd = tokio::process::Command::new("pg_dump");
 
     cmd.arg("--host")
         .arg(&conn_info.host)
@@ -1179,7 +1179,7 @@ async fn run_backup(
 
     println!("Cmd: {:?}", cmd);
 
-    let output_result = cmd.output()?;
+    let output_result = cmd.output().await?;
 
     if output_result.status.success() {
         println!("✓ Backup created successfully: {}", output);
@@ -1235,7 +1235,7 @@ async fn run_restore(
             );
         }
 
-        let mut cmd = std::process::Command::new("psql");
+        let mut cmd = tokio::process::Command::new("psql");
 
         cmd.arg("--host")
             .arg(&conn_info.host)
@@ -1257,7 +1257,7 @@ async fn run_restore(
             conn_info.host, conn_info.port, conn_info.user, conn_info.database, input
         );
 
-        cmd.output()?
+        cmd.output().await?
     } else {
         println!("Detected custom/directory/tar format, using pg_restore...");
 
@@ -1266,7 +1266,7 @@ async fn run_restore(
             return Err("pg_restore command not found. Please install PostgreSQL client tools. Example: sudo apt update && sudo apt install postgresql-client-16".into());
         }
 
-        let mut cmd = std::process::Command::new("pg_restore");
+        let mut cmd = tokio::process::Command::new("pg_restore");
 
         cmd.arg("--host")
             .arg(&conn_info.host)
@@ -1313,7 +1313,7 @@ async fn run_restore(
             input
         );
 
-        cmd.output()?
+        cmd.output().await?
     };
 
     if output_result.status.success() {
