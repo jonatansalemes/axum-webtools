@@ -1177,18 +1177,21 @@ async fn run_backup(
         cmd.env("PGPASSWORD", password);
     }
 
-    println!(
-        "Running: pg_dump --host {} --port {} --username {} --dbname {} --format {} --file {}{}{}{}",
-        conn_info.host,
-        conn_info.port,
-        conn_info.user,
-        conn_info.database,
-        format,
-        output,
-        if let Some(level) = compress { format!(" --compress {}", level) } else { String::new() },
-        if no_owner { " --no-owner" } else { "" },
-        if no_acl { " --no-acl" } else { "" }
+    // Log command being run (without sensitive information)
+    let mut cmd_str = format!(
+        "Running: pg_dump --host {} --port {} --username {} --dbname {} --format {} --file {}",
+        conn_info.host, conn_info.port, conn_info.user, conn_info.database, format, output
     );
+    if let Some(level) = compress {
+        cmd_str.push_str(&format!(" --compress {}", level));
+    }
+    if no_owner {
+        cmd_str.push_str(" --no-owner");
+    }
+    if no_acl {
+        cmd_str.push_str(" --no-acl");
+    }
+    println!("{}", cmd_str);
 
     let output_result = cmd.output()?;
 
