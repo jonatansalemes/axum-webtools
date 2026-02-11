@@ -1100,6 +1100,27 @@ fn command_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Get PostgreSQL major version from pg_dump
+fn get_pg_dump_version() -> Result<u32, Box<dyn std::error::Error>> {
+    let output = std::process::Command::new("pg_dump")
+        .arg("--version")
+        .output()?;
+    
+    let version_str = String::from_utf8(output.stdout)?;
+    
+    // Parse version string like "pg_dump (PostgreSQL) 16.1"
+    let version = version_str
+        .split_whitespace()
+        .nth(2)
+        .ok_or("Could not parse pg_dump version")?
+        .split('.')
+        .next()
+        .ok_or("Could not extract major version")?
+        .parse::<u32>()?;
+    
+    Ok(version)
+}
+
 /// Create a database backup using pg_dump
 async fn run_backup(
     database: &str,
@@ -1158,8 +1179,18 @@ async fn run_backup(
         .arg(output)
         .arg("--verbose");
 
+    // Handle compression based on PostgreSQL version
     if let Some(level) = compress {
-        cmd.arg("--compress").arg(level.to_string());
+        // Get PostgreSQL version to determine compression format
+        let pg_version = get_pg_dump_version().unwrap_or(15); // Default to 15 if version detection fails
+        
+        if pg_version >= 16 {
+            // PostgreSQL 16+ uses new format: --compress=gzip:N
+            cmd.arg(format!("--compress=gzip:{}", level));
+        } else {
+            // PostgreSQL < 16 uses old format: --compress N
+            cmd.arg("--compress").arg(level.to_string());
+        }
     }
 
     if no_owner {
