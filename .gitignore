@@ -1,2 +1,4 @@
 .idea
 target
+migrations
+backup-*.sql

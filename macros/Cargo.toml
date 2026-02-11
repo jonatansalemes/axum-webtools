@@ -2,7 +2,7 @@
 name = "axum-webtools-macros"
 version = "0.1.40"
 edition = "2021"
-license = "Apache-2.0"
+license = "AGPL-3"
 authors = ["Jonatan Lemes"]
 description = "General purpose macros for axum web framework."
 repository = "https://github.com/jonatansalemes/axum-webtools.git"

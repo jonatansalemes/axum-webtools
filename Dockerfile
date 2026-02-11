@@ -6,6 +6,7 @@ FROM base AS task
 RUN rustup component add rustfmt
 RUN rustup component add clippy
 RUN cargo install cargo-edit
+RUN apk --no-cache add postgresql-client
 
 FROM base AS builder-dlq-redrive
 COPY ./dlq-redrive/Cargo.toml ./
