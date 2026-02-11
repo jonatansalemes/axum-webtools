@@ -355,6 +355,152 @@ CREATE INDEX CONCURRENTLY idx_product_performance_times_sold ON product_performa
 -- split-end
 ```
 
+### Database Backup and Restore
+
+The `pgsql-migrate` tool includes comprehensive backup and restore functionality using PostgreSQL's native `pg_dump` and `pg_restore` utilities.
+
+#### Backup Command
+
+Create database backups with various formats and compression options:
+
+```bash
+# Basic backup with custom format (recommended)
+pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup.dump
+
+# Backup with compression level 9
+pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup.dump -c 9
+
+# Backup in plain SQL format (no compression supported)
+pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup.sql -f plain
+
+# Backup in directory format
+pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup_dir -f directory -c 5
+
+# Backup without ownership and ACL information
+pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup.dump --no-owner --no-acl
+```
+
+**Backup Parameters:**
+- `-d, --database`: Database connection URL (required)
+- `-o, --output`: Output file/directory path (required)
+- `-f, --format`: Backup format - `plain`, `custom`, `directory`, or `tar` (default: `custom`)
+- `-c, --compress`: Compression level 0-9 (not supported for plain format)
+- `--no-owner`: Exclude ownership information from backup
+- `--no-acl`: Exclude access control list (ACL) information from backup
+
+**Supported Formats:**
+- **custom** (recommended): Compressed binary format, restorable with pg_restore, allows selective restore
+- **plain**: Plain SQL script, restorable with psql, human-readable but larger
+- **directory**: Directory of files, one per table, supports parallel restore
+- **tar**: Tar archive format, restorable with pg_restore
+
+#### Restore Command
+
+Restore databases from backup files:
+
+```bash
+# Basic restore from custom format
+pgsql-migrate restore -d "postgres://user:pass@localhost/db" -i backup.dump
+
+# Restore from plain SQL file
+pgsql-migrate restore -d "postgres://user:pass@localhost/db" -i backup.sql
+
+# Restore with clean option (drop existing objects first)
+pgsql-migrate restore -d "postgres://user:pass@localhost/db" -i backup.dump --clean
+
+# Restore with create option (create database before restoring)
+pgsql-migrate restore -d "postgres://user:pass@localhost/db" -i backup.dump --create
+
+# Restore without ownership and ACL information
+pgsql-migrate restore -d "postgres://user:pass@localhost/db" -i backup.dump --no-owner --no-acl
+```
+
+**Restore Parameters:**
+- `-d, --database`: Database connection URL (required)
+- `-i, --input`: Input backup file/directory path (required)
+- `--clean`: Drop database objects before recreating them
+- `--create`: Create the database before restoring
+- `--no-owner`: Skip restoration of ownership
+- `--no-acl`: Skip restoration of access privileges (ACLs)
+
+**Format Detection:**
+The tool automatically detects whether the backup is in plain SQL format (using `psql`) or binary format (using `pg_restore`) by:
+1. Checking if the file extension is `.sql`
+2. Reading the first few bytes to detect the `PGDMP` magic header for custom/directory/tar formats
+
+#### Use Cases
+
+**Development Workflow:**
+```bash
+# 1. Backup production database (without ownership for portability)
+pgsql-migrate backup \
+  -d "postgres://prod_user:pass@prod.example.com/myapp" \
+  -o prod_backup.dump \
+  -c 9 \
+  --no-owner \
+  --no-acl
+
+# 2. Restore to local development database
+pgsql-migrate restore \
+  -d "postgres://dev_user:pass@localhost/myapp_dev" \
+  -i prod_backup.dump \
+  --clean
+```
+
+**Migration Testing:**
+```bash
+# 1. Backup database before running migrations
+pgsql-migrate backup \
+  -d "postgres://user:pass@localhost/db" \
+  -o pre_migration_backup.dump \
+  -c 9
+
+# 2. Run migrations
+pgsql-migrate up -d "postgres://user:pass@localhost/db"
+
+# 3. If something goes wrong, restore from backup
+pgsql-migrate restore \
+  -d "postgres://user:pass@localhost/db" \
+  -i pre_migration_backup.dump \
+  --clean
+```
+
+**Scheduled Backups:**
+```bash
+# Create daily backups with timestamp
+pgsql-migrate backup \
+  -d "postgres://user:pass@localhost/db" \
+  -o "backups/db_backup_$(date +%Y%m%d_%H%M%S).dump" \
+  -c 9 \
+  --no-owner \
+  --no-acl
+```
+
+#### Requirements
+
+The backup and restore commands require PostgreSQL client tools to be installed:
+
+- `pg_dump` - for creating backups
+- `pg_restore` - for restoring binary format backups
+- `psql` - for restoring plain SQL backups
+
+**Installation examples:**
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt install postgresql-client-16
+
+# MacOS
+brew install postgresql@16
+
+# RedHat/CentOS
+sudo yum install postgresql16
+```
+
+**PostgreSQL Version Compatibility:**
+The tool automatically detects the installed `pg_dump` version and adjusts compression flags accordingly:
+- PostgreSQL 16+: Uses `--compress=gzip:N` syntax
+- PostgreSQL 15 and earlier: Uses `--compress N` syntax
+
 ### Migration Tracking
 
 The tool automatically:
