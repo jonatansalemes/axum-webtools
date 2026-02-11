@@ -4,6 +4,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, Row};
 use std::fs;
 use std::path::Path;
+use urlencoding::decode;
 
 #[derive(Parser)]
 #[command(name = "pgsql-migrate")]
@@ -1049,11 +1050,11 @@ fn parse_pg_url(url: &str) -> Result<PgConnectionInfo, Box<dyn std::error::Error
     let (user, password) = if let Some(auth_str) = auth {
         let (u, p) = auth_str.split_once(':').unwrap_or((auth_str, ""));
         (
-            Some(u.to_string()),
+            Some(decode(u)?.into_owned()),
             if p.is_empty() {
                 None
             } else {
-                Some(p.to_string())
+                Some(decode(p)?.into_owned())
             },
         )
     } else {
@@ -1078,7 +1079,7 @@ fn parse_pg_url(url: &str) -> Result<PgConnectionInfo, Box<dyn std::error::Error
         database: if db_name.is_empty() {
             "postgres".to_string()
         } else {
-            db_name.to_string()
+            decode(db_name)?.into_owned()
         },
     })
 }
@@ -1409,6 +1410,84 @@ mod tests {
         );
         fs::remove_file(&expected_up)?;
         fs::remove_file(&expected_down)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_basic() -> Result<(), Box<dyn std::error::Error>> {
+        let url = "postgresql://user:pass@localhost:5432/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "user");
+        assert_eq!(info.password, Some("pass".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_encoded_password() -> Result<(), Box<dyn std::error::Error>> {
+        // Test password with @ symbol encoded as %40
+        let url = "postgresql://user:p%40ss@localhost:5432/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "user");
+        assert_eq!(info.password, Some("p@ss".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_encoded_username() -> Result<(), Box<dyn std::error::Error>> {
+        // Test username with @ symbol encoded as %40
+        let url = "postgresql://us%40er:pass@localhost:5432/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "us@er");
+        assert_eq!(info.password, Some("pass".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_special_chars() -> Result<(), Box<dyn std::error::Error>> {
+        // Test password with multiple special characters: p@ss:word/test?query
+        // Encoded as: p%40ss%3Aword%2Ftest%3Fquery
+        let url = "postgresql://user:p%40ss%3Aword%2Ftest%3Fquery@localhost:5432/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "user");
+        assert_eq!(info.password, Some("p@ss:word/test?query".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_defaults() -> Result<(), Box<dyn std::error::Error>> {
+        // Test URL with minimal information
+        let url = "postgresql://localhost/mydb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "postgres");
+        assert_eq!(info.password, None);
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "mydb");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pg_url_encoded_database() -> Result<(), Box<dyn std::error::Error>> {
+        // Test database name with special characters encoded
+        let url = "postgresql://user:pass@localhost:5432/my%2Ddb";
+        let info = parse_pg_url(url)?;
+        assert_eq!(info.user, "user");
+        assert_eq!(info.password, Some("pass".to_string()));
+        assert_eq!(info.host, "localhost");
+        assert_eq!(info.port, "5432");
+        assert_eq!(info.database, "my-db");
         Ok(())
     }
 }
