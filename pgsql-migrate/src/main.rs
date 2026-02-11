@@ -1050,11 +1050,23 @@ fn parse_pg_url(url: &str) -> Result<PgConnectionInfo, Box<dyn std::error::Error
     let (user, password) = if let Some(auth_str) = auth {
         let (u, p) = auth_str.split_once(':').unwrap_or((auth_str, ""));
         (
-            Some(decode(u)?.into_owned()),
+            Some(
+                decode(u)
+                    .map_err(|e| {
+                        format!("Invalid UTF-8 in username after URL decoding: {}", e)
+                    })?
+                    .into_owned(),
+            ),
             if p.is_empty() {
                 None
             } else {
-                Some(decode(p)?.into_owned())
+                Some(
+                    decode(p)
+                        .map_err(|e| {
+                            format!("Invalid UTF-8 in password after URL decoding: {}", e)
+                        })?
+                        .into_owned(),
+                )
             },
         )
     } else {
@@ -1079,11 +1091,16 @@ fn parse_pg_url(url: &str) -> Result<PgConnectionInfo, Box<dyn std::error::Error
         database: if db_name.is_empty() {
             "postgres".to_string()
         } else {
-            decode(db_name)?.into_owned()
+            decode(db_name)
+                .map_err(|e| {
+                    format!("Invalid UTF-8 in database name after URL decoding: {}", e)
+                })?
+                .into_owned()
         },
     })
 }
 
+#[derive(Debug)]
 struct PgConnectionInfo {
     host: String,
     port: String,
