@@ -1380,7 +1380,7 @@ mod tests {
     #[tokio::test]
     async fn test_backup() -> Result<(), Box<dyn std::error::Error>> {
         let database_url = get_database_url();
-        let backup_file = random_string("backup") + ".sql";
+        let backup_file = random_string("backup") + ".backup";
         run_backup(&database_url, &backup_file, "custom", Some(9), true, true).await?;
         assert!(
             Path::new(&backup_file).exists(),
