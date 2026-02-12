@@ -1,6 +1,6 @@
 [package]
 name = "axum-webtools-macros"
-version = "0.1.41"
+version = "0.1.42"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Jonatan Lemes"]
