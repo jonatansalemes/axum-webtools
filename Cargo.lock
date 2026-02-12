@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "argon2",
  "axum",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools-dlq-redrive"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "chrono",
  "clap",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools-macros"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "quote",
  "syn",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "axum-webtools-pgsql-migrate"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "clap",
  "rand 0.10.0",
