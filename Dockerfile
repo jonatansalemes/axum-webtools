@@ -32,8 +32,25 @@ RUN rm -rf ./src target/release/deps/pgsql_migrate*
 COPY ./pgsql-migrate/src ./src
 RUN cargo build --release
 
-FROM scratch AS prod-pgsql-migrate
-COPY --from=builder-pgsql-migrate /app/target/release/pgsql-migrate ./pgsql-migrate
+FROM alpine:3.21 AS prod-pgsql-migrate-pg17
+RUN apk add --no-cache \
+    ca-certificates \
+    libpq \
+    postgresql17-client \
+    && rm -rf /var/cache/apk/*
+COPY --from=builder-pgsql-migrate /app/target/release/pgsql-migrate /usr/local/bin/pgsql-migrate
 USER 65534:65534
-ENTRYPOINT ["./pgsql-migrate"]
+ENTRYPOINT ["pgsql-migrate"]
 CMD ["-h"]
+
+FROM alpine:3.21 AS prod-pgsql-migrate-pg16
+RUN apk add --no-cache \
+    ca-certificates \
+    libpq \
+    postgresql16-client \
+    && rm -rf /var/cache/apk/*
+COPY --from=builder-pgsql-migrate /app/target/release/pgsql-migrate /usr/local/bin/pgsql-migrate
+USER 65534:65534
+ENTRYPOINT ["pgsql-migrate"]
+CMD ["-h"]
+

@@ -39,13 +39,21 @@ services:
       target: prod-dlq-redrive
     image: axum-webtools-prod-dlq-redrive
 
-  prod-pgsql-migrate:
+  prod-pgsql-migrate-pg17:
     <<: *template
     build:
       context: .
       dockerfile: ./Dockerfile
-      target: prod-pgsql-migrate
-    image: axum-webtools-prod-pgsql-migrate
+      target: prod-pgsql-migrate-pg17
+    image: axum-webtools-prod-pgsql-migrate-pg17
+
+  prod-pgsql-migrate-pg16:
+    <<: *template
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      target: prod-pgsql-migrate-pg16
+    image: axum-webtools-prod-pgsql-migrate-pg16
 
   pgsql:
     image: postgres:16-alpine
