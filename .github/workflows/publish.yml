@@ -53,7 +53,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build and push Docker image
+      - name: Build and push DQL Redrive Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -63,5 +63,18 @@ jobs:
           tags: |
             jslsolucoes/axum-webtools-dlq-redrive:latest
             jslsolucoes/axum-webtools-dlq-redrive:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push PGSql Migrate Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: prod-pgsql-migrate
+          push: true
+          tags: |
+            jslsolucoes/axum-webtools-pgsql-migrate:latest
+            jslsolucoes/axum-webtools-pgsql-migrate:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
