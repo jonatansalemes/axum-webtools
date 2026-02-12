@@ -23,7 +23,7 @@ USER 65534:65534
 ENTRYPOINT ["./dlq-redrive"]
 CMD ["-h"]
 
-FROM base as builder-pgsql-migrate
+FROM base AS builder-pgsql-migrate
 COPY ./pgsql-migrate/Cargo.toml ./
 RUN mkdir src
 RUN echo "fn main() {}" > src/main.rs
