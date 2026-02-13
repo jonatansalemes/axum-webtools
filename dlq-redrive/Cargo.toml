@@ -1,6 +1,6 @@
 [package]
 name = "axum-webtools-dlq-redrive"
-version = "0.1.44"
+version = "0.1.45"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Jonatan Lemes"]
