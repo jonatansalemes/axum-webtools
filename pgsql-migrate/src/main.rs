@@ -1315,7 +1315,7 @@ pub fn get_pg_dump_version() -> Result<u32, Box<dyn std::error::Error>> {
 /// * `database` - Database connection URL
 /// * `output` - Output file path for the backup
 /// * `format` - Backup format (plain, custom, directory, or tar)
-/// * `compress` - Optional compression level (0-9)
+/// * `compress` - Optional compression level (1-9)
 /// * `jobs` - Optional number of parallel jobs for backup (directory format only)
 /// * `no_owner` - Exclude ownership information
 /// * `no_acl` - Exclude ACL information
@@ -1354,8 +1354,8 @@ pub async fn run_backup(
     };
 
     if let Some(level) = compress {
-        if level > 9 {
-            return Err("Compression level must be between 0 and 9".into());
+        if level < 1 || level > 9 {
+            return Err("Compression level must be between 1 and 9".into());
         }
         if format_flag == "p" {
             return Err("Compression is not supported for plain format".into());
