@@ -18,26 +18,26 @@ struct Cli {
 enum Commands {
     #[command(name = "up")]
     Up {
-        #[arg(short = 'p', long = "path", default_value = "migrations")]
-        path: String,
+        #[arg(short = 'p', long = "path")]
+        path: Option<String>,
 
         #[arg(short = 'd', long = "database")]
-        database: String,
+        database: Option<String>,
 
-        #[arg(short = 'e', long = "env", default_value = "prod")]
-        env: String,
+        #[arg(short = 'e', long = "env")]
+        env: Option<String>,
     },
 
     #[command(name = "down")]
     Down {
-        #[arg(short = 'p', long = "path", default_value = "migrations")]
-        path: String,
+        #[arg(short = 'p', long = "path")]
+        path: Option<String>,
 
         #[arg(short = 'd', long = "database")]
-        database: String,
+        database: Option<String>,
 
-        #[arg(short = 'e', long = "env", default_value = "prod")]
-        env: String,
+        #[arg(short = 'e', long = "env")]
+        env: Option<String>,
 
         #[arg(default_value = "1")]
         count: u32,
@@ -88,6 +88,9 @@ enum Commands {
 
         #[arg(short = 'c', long = "compress")]
         compress: Option<u8>,
+
+        #[arg(short = 'j', long = "jobs")]
+        jobs: Option<u8>,
 
         #[arg(long = "no-owner")]
         no_owner: bool,
@@ -228,7 +231,21 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             database,
             env,
         } => {
-            run_up(&path, &database, &env).await?;
+            let resolved_path =
+                resolve_config_value(path, "MIGRATIONS_DIR", Some("migrations"), "path")?;
+
+            let resolved_database =
+                resolve_config_value(database, "DATABASE_URL", None, "database")?;
+
+            let resolved_env = resolve_config_value(env, "ENV", Some("prod"), "env")?;
+
+            println!("Running migrations with:");
+            println!("  Path:     {}", resolved_path);
+            println!("  Database: {}", mask_database_url(&resolved_database));
+            println!("  Env:      {}", resolved_env);
+            println!();
+
+            run_up(&resolved_path, &resolved_database, &resolved_env).await?;
         }
         Commands::Down {
             path,
@@ -236,7 +253,22 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             env,
             count,
         } => {
-            run_down(&path, &database, &env, count).await?;
+            let resolved_path =
+                resolve_config_value(path, "MIGRATIONS_DIR", Some("migrations"), "path")?;
+
+            let resolved_database =
+                resolve_config_value(database, "DATABASE_URL", None, "database")?;
+
+            let resolved_env = resolve_config_value(env, "ENV", Some("prod"), "env")?;
+
+            println!("Rolling back migrations with:");
+            println!("  Path:     {}", resolved_path);
+            println!("  Database: {}", mask_database_url(&resolved_database));
+            println!("  Env:      {}", resolved_env);
+            println!("  Count:    {}", count);
+            println!();
+
+            run_down(&resolved_path, &resolved_database, &resolved_env, count).await?;
         }
         Commands::Create { dir, name } => {
             create_migration(&dir, &name)?;
@@ -260,10 +292,14 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             output,
             format,
             compress,
+            jobs,
             no_owner,
             no_acl,
         } => {
-            run_backup(&database, &output, &format, compress, no_owner, no_acl).await?;
+            run_backup(
+                &database, &output, &format, compress, jobs, no_owner, no_acl,
+            )
+            .await?;
         }
         Commands::Restore {
             database,
@@ -278,6 +314,69 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Resolves a configuration value with priority: CLI argument > environment variable > default.
+///
+/// # Arguments
+/// * `cli_value` - Optional value provided via CLI argument
+/// * `env_var_name` - Name of the environment variable to check
+/// * `default_value` - Optional default value if both CLI and env var are missing
+/// * `config_name` - Human-readable name of the configuration for error messages
+///
+/// # Returns
+/// * The resolved value or an error if no value could be determined
+fn resolve_config_value(
+    cli_value: Option<String>,
+    env_var_name: &str,
+    default_value: Option<&str>,
+    config_name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if let Some(value) = cli_value {
+        if !value.trim().is_empty() {
+            return Ok(value);
+        }
+    }
+
+    if let Ok(value) = std::env::var(env_var_name) {
+        if !value.trim().is_empty() {
+            return Ok(value);
+        }
+    }
+
+    if let Some(default) = default_value {
+        return Ok(default.to_string());
+    }
+
+    Err(format!(
+        "Missing required configuration '{}'. Provide it via:\n  \
+         - CLI argument: --{}\n  \
+         - Environment variable: {}",
+        config_name, config_name, env_var_name
+    )
+    .into())
+}
+
+/// Masks sensitive parts of a database URL for safe display.
+///
+/// # Arguments
+/// * `url` - The database connection URL
+///
+/// # Returns
+/// * A masked version of the URL with password hidden
+fn mask_database_url(url: &str) -> String {
+    if let Some(at_pos) = url.find('@') {
+        if let Some(proto_end) = url.find("://") {
+            let after_proto = &url[proto_end + 3..at_pos];
+            if let Some(colon_pos) = after_proto.find(':') {
+                let user = &after_proto[..colon_pos];
+                let before_auth = &url[..proto_end + 3];
+                let after_auth = &url[at_pos..];
+                return format!("{}{}:****{}", before_auth, user, after_auth);
+            }
+        }
+    }
+    url.to_string()
 }
 
 /// Normalizes a migration name by converting to lowercase and replacing invalid characters.
@@ -1217,6 +1316,7 @@ pub fn get_pg_dump_version() -> Result<u32, Box<dyn std::error::Error>> {
 /// * `output` - Output file path for the backup
 /// * `format` - Backup format (plain, custom, directory, or tar)
 /// * `compress` - Optional compression level (0-9)
+/// * `jobs` - Optional number of parallel jobs for backup (directory format only)
 /// * `no_owner` - Exclude ownership information
 /// * `no_acl` - Exclude ACL information
 ///
@@ -1227,6 +1327,7 @@ pub async fn run_backup(
     output: &str,
     format: &str,
     compress: Option<u8>,
+    jobs: Option<u8>,
     no_owner: bool,
     no_acl: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1261,6 +1362,15 @@ pub async fn run_backup(
         }
     }
 
+    if let Some(num_jobs) = jobs {
+        if num_jobs == 0 {
+            return Err("Number of jobs must be at least 1".into());
+        }
+        if format_flag != "d" {
+            return Err("Parallel backup (--jobs) is only supported for directory format. Use --format directory".into());
+        }
+    }
+
     let mut cmd = tokio::process::Command::new("pg_dump");
 
     cmd.arg("--host")
@@ -1276,19 +1386,20 @@ pub async fn run_backup(
         .arg("--verbose");
 
     if let Some(level) = compress {
-        let pg_version = match get_pg_dump_version() {
-            Ok(version) => version,
-            Err(e) => {
-                eprintln!("Warning: Could not detect PostgreSQL version ({}). Defaulting to PostgreSQL {}.", e, DEFAULT_PG_VERSION);
-                DEFAULT_PG_VERSION
-            }
-        };
+        let pg_version = get_pg_dump_version().unwrap_or_else(|e| {
+            eprintln!("Warning: Could not detect the PostgreSQL version ({}). Defaulting to PostgreSQL {}.", e, DEFAULT_PG_VERSION);
+            DEFAULT_PG_VERSION
+        });
 
         if pg_version >= 16 {
             cmd.arg(format!("--compress=gzip:{}", level));
         } else {
             cmd.arg("--compress").arg(level.to_string());
         }
+    }
+
+    if let Some(num_jobs) = jobs {
+        cmd.arg("--jobs").arg(num_jobs.to_string());
     }
 
     if no_owner {
@@ -1312,6 +1423,9 @@ pub async fn run_backup(
     if let Some(level) = compress {
         cmd_str.push_str(&format!(" --compress {}", level));
     }
+    if let Some(num_jobs) = jobs {
+        cmd_str.push_str(&format!(" --jobs {}", num_jobs));
+    }
     if no_owner {
         cmd_str.push_str(" --no-owner");
     }
@@ -1327,6 +1441,9 @@ pub async fn run_backup(
         println!("  Format: {}", format);
         if let Some(level) = compress {
             println!("  Compression: level {}", level);
+        }
+        if let Some(num_jobs) = jobs {
+            println!("  Parallel jobs: {}", num_jobs);
         }
         if no_owner {
             println!("  No ownership information");
@@ -1528,7 +1645,16 @@ mod tests {
     async fn test_backup() -> Result<(), Box<dyn std::error::Error>> {
         let database_url = get_database_url();
         let backup_file = random_string("backup") + ".backup";
-        run_backup(&database_url, &backup_file, "custom", Some(9), true, true).await?;
+        run_backup(
+            &database_url,
+            &backup_file,
+            "custom",
+            Some(9),
+            None,
+            true,
+            true,
+        )
+        .await?;
         assert!(
             Path::new(&backup_file).exists(),
             "Backup file was not created"
