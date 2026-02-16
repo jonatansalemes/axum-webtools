@@ -32,7 +32,7 @@ RUN rm -rf ./src target/release/deps/pgsql_migrate*
 COPY ./pgsql-migrate/src ./src
 RUN cargo build --release
 
-FROM alpine:3.21 AS prod-pgsql-migrate-pg17
+FROM alpine:3.23 AS prod-pgsql-migrate-pg17
 RUN apk add --no-cache \
     ca-certificates \
     libpq \
@@ -43,7 +43,7 @@ USER 65534:65534
 ENTRYPOINT ["pgsql-migrate"]
 CMD ["-h"]
 
-FROM alpine:3.21 AS prod-pgsql-migrate-pg16
+FROM alpine:3.23 AS prod-pgsql-migrate-pg16
 RUN apk add --no-cache \
     ca-certificates \
     libpq \
