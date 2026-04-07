@@ -111,7 +111,11 @@ async fn main() -> Result<(), std::io::Error> {
         )
         .route(
             "/api/v1/authenticated",
-            get(authenticated_handler),
+            get(authenticated_handler)
+                    .layer(
+                       RequireScopeLayer::new()
+                               .with(vec!["customers:read", "customers:write"])
+                    ),
         )
         .with_state(pool);
 
