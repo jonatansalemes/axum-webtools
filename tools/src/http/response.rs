@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use thiserror::Error;
-use utoipa::ToSchema;
 use validator::{ValidationError, ValidationErrors};
 
 #[derive(Debug)]
@@ -151,14 +150,14 @@ impl IntoResponse for HttpError {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
 pub struct BadRequestValidationErrorItemResponse {
     pub code: String,
     pub message: Option<String>,
     pub params: HashMap<String, Value>,
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
 pub struct BadRequestValidationErrorResponse {
     pub messages: Vec<BadRequestValidationErrorItemResponse>,
     pub status_code: u16,
@@ -166,7 +165,7 @@ pub struct BadRequestValidationErrorResponse {
 
 macro_rules! http_error_struct {
     ($name:ident) => {
-        #[derive(Serialize, Deserialize, ToSchema)]
+        #[derive(Serialize, Deserialize)]
         pub struct $name {
             pub message: String,
             #[serde(rename = "statusCode")]

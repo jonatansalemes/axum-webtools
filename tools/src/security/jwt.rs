@@ -2,7 +2,7 @@ use axum::{
     extract::Request, http::StatusCode, response::IntoResponse, response::Response, Json,
     RequestExt,
 };
-use chrono::TimeDelta;
+use chrono::{DateTime, TimeDelta, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 
 use axum::extract::FromRequestParts;
@@ -44,20 +44,33 @@ pub fn parse_jwt_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Erro
 
 pub struct CreateJwtResult {
     pub access_token: String,
-    pub expires_in: u64,
+    pub access_token_expires_at: DateTime<Utc>,
+    pub scopes: Vec<String>,
+    pub issuer: String,
+    pub audience: String,
+    pub subject: String,
+}
+
+pub struct CreateJwtConfig {
+    pub expires_in: TimeDelta,
+    pub subject: String,
     pub scopes: Vec<String>,
 }
 
-pub fn create_jwt_token(subject: impl Into<String>, scopes: Vec<String>) -> CreateJwtResult {
-    let now = chrono::Utc::now();
-    let expires_at = TimeDelta::try_days(7)
-        .map(|d| now + d)
-        .expect("Failed to calculate expiration date");
-    let issued_at = now.timestamp() as u64;
-    let exp = expires_at.timestamp() as u64;
+pub fn create_jwt_token(
+    config: CreateJwtConfig,
+) -> Result<CreateJwtResult, jsonwebtoken::errors::Error> {
+    let jwt_secret = get_jwt_secret();
     let iss = get_jwt_issuer();
     let aud = get_jwt_audience();
-    let sub = subject.into();
+    let sub = config.subject;
+    let scopes = config.scopes;
+    let expires_in = config.expires_in;
+
+    let now = Utc::now();
+    let access_token_expires_at = now + expires_in;
+    let issued_at = now.timestamp() as u64;
+    let exp = access_token_expires_at.timestamp() as u64;
 
     let claims = Claims {
         iss,
@@ -65,17 +78,19 @@ pub fn create_jwt_token(subject: impl Into<String>, scopes: Vec<String>) -> Crea
         issued_at,
         exp,
         aud,
-        scopes: scopes.clone(),
+        scopes,
     };
 
-    let jwt_secret = get_jwt_secret();
     let encode_key = EncodingKey::from_secret(jwt_secret.as_bytes());
-    let access_token = encode(&Header::default(), &claims, &encode_key).unwrap();
-    CreateJwtResult {
+    let access_token = encode(&Header::default(), &claims, &encode_key)?;
+    Ok(CreateJwtResult {
         access_token,
-        expires_in: exp,
-        scopes,
-    }
+        access_token_expires_at,
+        scopes: claims.scopes,
+        issuer: claims.iss,
+        audience: claims.aud,
+        subject: claims.sub,
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -306,11 +321,16 @@ mod tests {
     fn test_create_token() {
         setup();
         let email: String = FreeEmail().fake();
-        let jwt_token = create_jwt_token(email.clone(), vec!["customers:read".to_string()]);
+        let config = CreateJwtConfig {
+            subject: email.clone(),
+            scopes: vec!["customers:read".to_string()],
+            expires_in: chrono::Duration::days(7),
+        };
+        let jwt_token = create_jwt_token(config).expect("Failed to create JWT token");
         assert_eq!(jwt_token.scopes, vec!["customers:read"]);
         let now_plus_5_days =
             (chrono::Utc::now() + chrono::Duration::days(7)) - chrono::Duration::seconds(30);
-        assert!(jwt_token.expires_in > now_plus_5_days.timestamp() as u64);
+        assert!(jwt_token.access_token_expires_at > now_plus_5_days);
 
         let claims = parse_jwt_token(&jwt_token.access_token).unwrap();
         assert_eq!(vec!["customers:read".to_string()], claims.scopes);
@@ -321,7 +341,12 @@ mod tests {
     fn test_invalid_token() {
         setup();
         let email: String = FreeEmail().fake();
-        let mut token = create_jwt_token(email, vec![]);
+        let config = CreateJwtConfig {
+            subject: email,
+            scopes: vec![],
+            expires_in: chrono::Duration::days(7),
+        };
+        let mut token = create_jwt_token(config).expect("Failed to create JWT token");
         token.access_token.push('a');
         let claims = parse_jwt_token(&token.access_token);
         assert!(claims.is_err());

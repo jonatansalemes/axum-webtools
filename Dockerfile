@@ -1,4 +1,4 @@
-FROM rust:1.93-alpine AS base
+FROM rust:1.94-alpine AS base
 RUN apk --no-cache add ca-certificates cmake make gcc g++ musl-dev curl-dev zlib-static
 WORKDIR /app
 
@@ -18,7 +18,7 @@ COPY ./dlq-redrive/src ./src
 RUN cargo build --release
 
 FROM scratch AS prod-dlq-redrive
-COPY --from=builder-dlq-redrive /app/target/release/dlq-redrive ./dlq-redrive
+COPY --from=builder-dlq-redrive --chown=65534:65534 /app/target/release/dlq-redrive ./dlq-redrive
 USER 65534:65534
 ENTRYPOINT ["./dlq-redrive"]
 CMD ["-h"]
@@ -32,24 +32,24 @@ RUN rm -rf ./src target/release/deps/pgsql_migrate*
 COPY ./pgsql-migrate/src ./src
 RUN cargo build --release
 
-FROM alpine:3.21 AS prod-pgsql-migrate-pg17
+FROM alpine:3.23 AS prod-pgsql-migrate-pg17
 RUN apk add --no-cache \
     ca-certificates \
     libpq \
     postgresql17-client \
     && rm -rf /var/cache/apk/*
-COPY --from=builder-pgsql-migrate /app/target/release/pgsql-migrate /usr/local/bin/pgsql-migrate
+COPY --from=builder-pgsql-migrate --chown=65534:65534 /app/target/release/pgsql-migrate /usr/local/bin/pgsql-migrate
 USER 65534:65534
 ENTRYPOINT ["pgsql-migrate"]
 CMD ["-h"]
 
-FROM alpine:3.21 AS prod-pgsql-migrate-pg16
+FROM alpine:3.23 AS prod-pgsql-migrate-pg16
 RUN apk add --no-cache \
     ca-certificates \
     libpq \
     postgresql16-client \
     && rm -rf /var/cache/apk/*
-COPY --from=builder-pgsql-migrate /app/target/release/pgsql-migrate /usr/local/bin/pgsql-migrate
+COPY --from=builder-pgsql-migrate --chown=65534:65534 /app/target/release/pgsql-migrate /usr/local/bin/pgsql-migrate
 USER 65534:65534
 ENTRYPOINT ["pgsql-migrate"]
 CMD ["-h"]

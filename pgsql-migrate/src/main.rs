@@ -1354,7 +1354,7 @@ pub async fn run_backup(
     };
 
     if let Some(level) = compress {
-        if level < 1 || level > 9 {
+        if !(1..=9).contains(&level) {
             return Err("Compression level must be between 1 and 9".into());
         }
         if format_flag == "p" {
