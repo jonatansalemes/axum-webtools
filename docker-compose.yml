@@ -11,7 +11,7 @@ x-template: &template
       condition: service_healthy
   environment:
     ENV: dev
-    RUST_LOG: server=DEBUG,INFO
+    RUST_LOG: INFO
     RUST_BACKTRACE: FULL
     KAFKA_BROKERS: kafka:9092
     DATABASE_URL: postgres://pgsqlmigrate:pgsqlmigrate@pgsql:5432/pgsqlmigrate
