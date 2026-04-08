@@ -29,6 +29,7 @@ pub async fn request<T: Serialize, R: DeserializeOwned>(
         issued_at: chrono::Utc::now().timestamp() as u64,
         exp: (chrono::Utc::now() + chrono::Duration::days(7)).timestamp() as u64,
         scopes: vec![],
+        extra: (),
     });
     let request = Request::builder()
         .header("Content-Type", "application/json")

@@ -29,7 +29,10 @@ fn get_jwt_audience() -> String {
     std::env::var("JWT_AUDIENCE").expect("JWT_AUDIENCE must be set")
 }
 
-pub fn parse_jwt_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+pub fn parse_jwt_token<Extra>(token: &str) -> Result<Claims<Extra>, jsonwebtoken::errors::Error>
+where
+    Extra: for<'de> Deserialize<'de>,
+{
     let jwt_issuer = get_jwt_issuer();
     let jwt_audience = get_jwt_audience();
     let jwt_secret = get_jwt_secret();
@@ -38,7 +41,7 @@ pub fn parse_jwt_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Erro
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&[jwt_audience]);
     validation.set_issuer(&[jwt_issuer]);
-    let token_data = decode::<Claims>(token, &decode_key, &validation)?;
+    let token_data = decode::<Claims<Extra>>(token, &decode_key, &validation)?;
     Ok(token_data.claims)
 }
 
@@ -51,15 +54,19 @@ pub struct CreateJwtResult {
     pub subject: String,
 }
 
-pub struct CreateJwtConfig {
+pub struct CreateJwtConfig<Extra = ()> {
     pub expires_in: TimeDelta,
     pub subject: String,
     pub scopes: Vec<String>,
+    pub extra: Extra,
 }
 
-pub fn create_jwt_token(
-    config: CreateJwtConfig,
-) -> Result<CreateJwtResult, jsonwebtoken::errors::Error> {
+pub fn create_jwt_token<Extra>(
+    config: CreateJwtConfig<Extra>,
+) -> Result<CreateJwtResult, jsonwebtoken::errors::Error>
+where
+    Extra: Serialize,
+{
     let jwt_secret = get_jwt_secret();
     let iss = get_jwt_issuer();
     let aud = get_jwt_audience();
@@ -79,6 +86,7 @@ pub fn create_jwt_token(
         exp,
         aud,
         scopes,
+        extra: config.extra,
     };
 
     let encode_key = EncodingKey::from_secret(jwt_secret.as_bytes());
@@ -94,16 +102,18 @@ pub fn create_jwt_token(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
+pub struct Claims<Extra = ()> {
     pub sub: String,
     pub aud: String,
     pub iss: String,
     pub issued_at: u64,
     pub exp: u64,
     pub scopes: Vec<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 
-impl Claims {
+impl<Extra> Claims<Extra> {
     pub fn has_scopes(&self, expected_scopes: &[String]) -> bool {
         expected_scopes
             .iter()
@@ -111,9 +121,9 @@ impl Claims {
     }
 }
 
-impl Display for Claims {
+impl<Extra> Display for Claims<Extra> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Email: {}", self.sub)
+        write!(f, "Subject: {}", self.sub)
     }
 }
 
@@ -176,7 +186,7 @@ where
         let mut inner = self.inner.clone();
 
         Box::pin(async move {
-            match request.extract_parts::<Claims>().await {
+            match request.extract_parts::<Claims<()>>().await {
                 Ok(claims) => {
                     if claims.has_scopes(&required_scopes) {
                         return inner.call(request).await;
@@ -205,9 +215,10 @@ use thiserror::Error;
 use tower::{Layer, Service};
 
 #[cfg(not(any(test, feature = "mock_jwt")))]
-impl<S> FromRequestParts<S> for Claims
+impl<S, Extra> FromRequestParts<S> for Claims<Extra>
 where
     S: Send + Sync,
+    Extra: for<'de> Deserialize<'de> + Send,
 {
     type Rejection = AuthError;
 
@@ -222,9 +233,10 @@ where
 }
 
 #[cfg(any(test, feature = "mock_jwt"))]
-impl<S> FromRequestParts<S> for Claims
+impl<S, Extra> FromRequestParts<S> for Claims<Extra>
 where
     S: Send + Sync,
+    Extra: Default + Send,
 {
     type Rejection = AuthError;
 
@@ -282,6 +294,7 @@ where
             issued_at,
             exp,
             scopes,
+            extra: Extra::default(),
         })
     }
 }
@@ -325,6 +338,7 @@ mod tests {
             subject: email.clone(),
             scopes: vec!["customers:read".to_string()],
             expires_in: chrono::Duration::days(7),
+            extra: (),
         };
         let jwt_token = create_jwt_token(config).expect("Failed to create JWT token");
         assert_eq!(jwt_token.scopes, vec!["customers:read"]);
@@ -332,7 +346,7 @@ mod tests {
             (chrono::Utc::now() + chrono::Duration::days(7)) - chrono::Duration::seconds(30);
         assert!(jwt_token.access_token_expires_at > now_plus_5_days);
 
-        let claims = parse_jwt_token(&jwt_token.access_token).unwrap();
+        let claims: Claims<()> = parse_jwt_token(&jwt_token.access_token).unwrap();
         assert_eq!(vec!["customers:read".to_string()], claims.scopes);
         assert_eq!(email, claims.sub);
     }
@@ -345,10 +359,11 @@ mod tests {
             subject: email,
             scopes: vec![],
             expires_in: chrono::Duration::days(7),
+            extra: (),
         };
         let mut token = create_jwt_token(config).expect("Failed to create JWT token");
         token.access_token.push('a');
-        let claims = parse_jwt_token(&token.access_token);
+        let claims: Result<Claims<()>, _> = parse_jwt_token(&token.access_token);
         assert!(claims.is_err());
     }
 }
