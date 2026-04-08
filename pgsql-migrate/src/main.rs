@@ -466,9 +466,8 @@ pub fn create_migration(dir: &str, name: &str) -> Result<(), Box<dyn std::error:
 /// # Returns
 /// * A hexadecimal string representation of the SHA-256 hash
 pub fn compute_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
+    let bytes = Sha256::digest(content.as_bytes());
+    hex::encode(bytes)
 }
 
 #[derive(Debug, Clone)]
@@ -1754,6 +1753,14 @@ mod tests {
         assert_eq!(info.host, "localhost");
         assert_eq!(info.port, "5432");
         assert_eq!(info.database, "my-db");
+        Ok(())
+    }
+
+    #[test]
+    fn test_compute_hash() -> Result<(), Box<dyn std::error::Error>> {
+        let sql = "123456";
+        let hash = compute_hash(sql);
+        assert_eq!(hash, "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92");
         Ok(())
     }
 }

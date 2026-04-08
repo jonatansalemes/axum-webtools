@@ -28,7 +28,6 @@ use axum_webtools::db::sqlx::with_tx;
 use axum_webtools::http::response::{ok, HttpError};
 use axum_webtools::security::jwt::Claims;
 use log::info;
-use scoped_futures::ScopedFutureExt;
 use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -71,13 +70,13 @@ async fn create_new_user_handler(
 ) -> Result<Response, HttpError> {
     // with_tx is a helper function that wraps the transaction logic
     // if the closure returns an error, the transaction will be rolled back
-    with_tx(&pool, |tx| async move {
+    with_tx(&pool, async |tx| {
         let user = create_new_user("someemail", "somepassword", tx).await?;
         ok(CreateNewUserResponse {
             id: user.id,
             email: user.email,
         })
-    }.scope_boxed())
+    })
         .await
 }
 
@@ -114,7 +113,7 @@ async fn main() -> Result<(), std::io::Error> {
             get(authenticated_handler)
                     .layer(
                        RequireScopeLayer::new()
-                               .with(vec!["customers:read", "customers:write"])
+                               .with(vec!["some:scope"])
                     ),
         )
         .with_state(pool);
