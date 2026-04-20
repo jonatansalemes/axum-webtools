@@ -1,4 +1,4 @@
-FROM rust:1.94-alpine AS base
+FROM rust:1.95-alpine AS base
 RUN apk --no-cache add ca-certificates cmake make gcc g++ musl-dev curl-dev zlib-static
 WORKDIR /app
 
