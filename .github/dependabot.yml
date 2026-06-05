@@ -25,6 +25,18 @@ updates:
         patterns:
           - "*"
 
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    groups:
+      all-docker-compose-dependencies:
+        patterns:
+          - "*"
+
   - package-ecosystem: "cargo"
     directories:
       - "/dlq-redrive"

@@ -56,13 +56,13 @@ services:
     image: axum-webtools-prod-pgsql-migrate-pg16
 
   pgsql:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: pgsqlmigrate
       POSTGRES_PASSWORD: pgsqlmigrate
       POSTGRES_DB: pgsqlmigrate
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql
     ports:
       - "5433:5432"
     healthcheck:
@@ -75,7 +75,7 @@ services:
       - axum-webtools-network
 
   kafka:
-    image: confluentinc/cp-kafka:8.0.0
+    image: confluentinc/cp-kafka:8.2.1
     environment:
       CLUSTER_ID: qv6BBXI9TKuOcPZWfd89as
       KAFKA_PROCESS_ROLES: broker,controller

@@ -50,7 +50,7 @@ mod tests {
     fn test_fixed_passwd() {
         let password_hash = "$argon2id$v=19$m=19456,t=2,p=1$wijorMW9eKJS9TlAw/Ay1w$Pl7feMYupjerbKpS563kFwdi9K3PdcjUnx5f4pNEbjI";
         let password = "12345678";
-        assert_eq!(argo2_verify_password(password_hash, password).unwrap(), true);
+        assert!(argo2_verify_password(password_hash, password).unwrap());
     }
 
     #[test]

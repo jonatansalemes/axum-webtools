@@ -17,12 +17,12 @@ name = "dlq-redrive"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1.51.0", features = ["full"] }
-clap = { version = "4.6.0", features = ["derive"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = { version = "1.0.149" }
-chrono = { version = "0.4.44" }
-rdkafka = { version = "0.39.0", features = ["cmake-build"] }
+tokio = { version = "1.52", features = ["full"] }
+clap = { version = "4.6", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+chrono = { version = "0.4" }
+rdkafka = { version = "0.39", features = ["cmake-build"] }
 
 [dev-dependencies]
-rand = { version = "0.10.0" }
+rand = { version = "0.10" }
