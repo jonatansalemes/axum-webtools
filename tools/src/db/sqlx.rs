@@ -22,7 +22,6 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -37,15 +36,18 @@ mod tests {
     async fn test_tx_commit() -> Result<(), sqlx::Error> {
         let pgsql_pool = Pool::<sqlx::Postgres>::connect(&get_database_url()).await?;
         let res = with_tx(&pgsql_pool, async |tx| -> Result<&str, sqlx::Error> {
-                sqlx::query("CREATE TABLE IF NOT EXISTS test_tx_commit (id SERIAL PRIMARY KEY, name TEXT)")
-                    .execute(&mut **tx)
-                    .await?;
-                sqlx::query("INSERT INTO test_tx_commit (name) VALUES ($1)")
-                    .bind("test commit".to_string())
-                    .execute(&mut **tx)
-                    .await?;
-                Ok("some")
-        }).await;
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS test_tx_commit (id SERIAL PRIMARY KEY, name TEXT)",
+            )
+            .execute(&mut **tx)
+            .await?;
+            sqlx::query("INSERT INTO test_tx_commit (name) VALUES ($1)")
+                .bind("test commit".to_string())
+                .execute(&mut **tx)
+                .await?;
+            Ok("some")
+        })
+        .await;
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), "some");
         Ok(())
@@ -54,24 +56,28 @@ mod tests {
     //with rollback
 
     #[tokio::test]
-    async fn test_tx_rollback () -> Result<(), sqlx::Error> {
+    async fn test_tx_rollback() -> Result<(), sqlx::Error> {
         let pgsql_pool = Pool::<sqlx::Postgres>::connect(&get_database_url()).await?;
-        let res: Result<bool, sqlx::Error> = with_tx(&pgsql_pool, async |tx| -> Result<bool, sqlx::Error> {
-            sqlx::query("CREATE TABLE IF NOT EXISTS test_tx_commit (id SERIAL PRIMARY KEY, name TEXT)")
+        let res: Result<bool, sqlx::Error> =
+            with_tx(&pgsql_pool, async |tx| -> Result<bool, sqlx::Error> {
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS test_tx_commit (id SERIAL PRIMARY KEY, name TEXT)",
+                )
                 .execute(&mut **tx)
                 .await?;
-            sqlx::query("INSERT INTO test_tx_commit (name) VALUES ($1)")
-                .bind("test commit".to_string())
-                .execute(&mut **tx)
-                .await?;
+                sqlx::query("INSERT INTO test_tx_commit (name) VALUES ($1)")
+                    .bind("test commit".to_string())
+                    .execute(&mut **tx)
+                    .await?;
 
-            sqlx::query("INSERT INTO test_tx_commit (name, other) VALUES ($1,$2)")
-                .bind("test commit".to_string())
-                .bind("test rollback2".to_string())
-                .execute(&mut **tx)
-                .await?;
-            Ok(true)
-        }).await;
+                sqlx::query("INSERT INTO test_tx_commit (name, other) VALUES ($1,$2)")
+                    .bind("test commit".to_string())
+                    .bind("test rollback2".to_string())
+                    .execute(&mut **tx)
+                    .await?;
+                Ok(true)
+            })
+            .await;
         assert!(res.is_err());
         Ok(())
     }

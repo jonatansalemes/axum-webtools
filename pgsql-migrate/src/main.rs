@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, Row};
+use sqlx::{AssertSqlSafe, Executor, Row};
 use std::fs;
 use std::path::Path;
 use urlencoding::decode;
@@ -827,7 +827,7 @@ pub async fn run_up(
 
                         if use_transaction {
                             let mut tx = pool.begin().await?;
-                            match tx.execute(block.content.as_str()).await {
+                            match tx.execute(AssertSqlSafe(block.content.as_str())).await {
                                 Ok(_) => {
                                     tx.commit().await?;
                                 }
@@ -838,7 +838,7 @@ pub async fn run_up(
                                 }
                             }
                         } else {
-                            match pool.execute(block.content.as_str()).await {
+                            match pool.execute(AssertSqlSafe(block.content.as_str())).await {
                                 Ok(_) => {}
                                 Err(e) => {
                                     eprintln!("  Error in block {}: {}", i + 1, e);
@@ -854,7 +854,10 @@ pub async fn run_up(
             }
         } else if use_transaction {
             let mut tx = pool.begin().await?;
-            match tx.execute(migration.up.content.as_str()).await {
+            match tx
+                .execute(AssertSqlSafe(migration.up.content.as_str()))
+                .await
+            {
                 Ok(_) => {
                     tx.commit().await?;
                     Ok(())
@@ -862,7 +865,7 @@ pub async fn run_up(
                 Err(e) => Err(e.into()),
             }
         } else {
-            pool.execute(migration.up.content.as_str())
+            pool.execute(AssertSqlSafe(migration.up.content.as_str()))
                 .await
                 .map(|_| ())
                 .map_err(|e| e.into())
@@ -984,7 +987,7 @@ pub async fn run_down(
 
                             if use_transaction {
                                 let mut tx = pool.begin().await?;
-                                match tx.execute(block.content.as_str()).await {
+                                match tx.execute(AssertSqlSafe(block.content.as_str())).await {
                                     Ok(_) => {
                                         tx.commit().await?;
                                     }
@@ -995,7 +998,7 @@ pub async fn run_down(
                                     }
                                 }
                             } else {
-                                match pool.execute(block.content.as_str()).await {
+                                match pool.execute(AssertSqlSafe(block.content.as_str())).await {
                                     Ok(_) => {}
                                     Err(e) => {
                                         eprintln!("  Error in block {}: {}", i + 1, e);
@@ -1011,7 +1014,10 @@ pub async fn run_down(
                 }
             } else if use_transaction {
                 let mut tx = pool.begin().await?;
-                match tx.execute(migration.down.content.as_str()).await {
+                match tx
+                    .execute(AssertSqlSafe(migration.down.content.as_str()))
+                    .await
+                {
                     Ok(_) => {
                         tx.commit().await?;
                         Ok(())
@@ -1019,7 +1025,7 @@ pub async fn run_down(
                     Err(e) => Err(e.into()),
                 }
             } else {
-                pool.execute(migration.down.content.as_str())
+                pool.execute(AssertSqlSafe(migration.down.content.as_str()))
                     .await
                     .map(|_| ())
                     .map_err(|e| e.into())
@@ -1760,7 +1766,10 @@ mod tests {
     fn test_compute_hash() -> Result<(), Box<dyn std::error::Error>> {
         let sql = "123456";
         let hash = compute_hash(sql);
-        assert_eq!(hash, "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92");
+        assert_eq!(
+            hash,
+            "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92"
+        );
         Ok(())
     }
 }

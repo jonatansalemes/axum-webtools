@@ -93,7 +93,7 @@ jobs:
             --health-interval 10s \
             --health-timeout 5s \
             --health-retries 5 \
-            confluentinc/cp-kafka:8.0.0
+            confluentinc/cp-kafka:8.2.1
 
       - name: Wait for services to be healthy
         if: inputs.needs_db || inputs.needs_kafka
