@@ -151,6 +151,12 @@ pgsql-migrate up -d "postgres://user:pass@localhost/db"
 # Run migrations with specific environment (default: prod)
 pgsql-migrate up -d "postgres://user:pass@localhost/db" -e dev
 
+# Run migrations with safe mode (watch for critical tables)
+pgsql-migrate up -d "postgres://user:pass@localhost/db" --safe-mode "users,orders"
+
+# Run migrations with safe mode in CI/CD (fail instead of prompting)
+pgsql-migrate up -d "postgres://user:pass@localhost/db" --safe-mode "users,orders" --safe-mode-confirm exit-with-error
+
 # Rollback migrations (rollback 1 migration by default)
 pgsql-migrate down -d "postgres://user:pass@localhost/db"
 
@@ -318,7 +324,80 @@ pgsql-migrate up -d "postgres://user:pass@localhost/db"
 pgsql-migrate up -d "postgres://user:pass@localhost/db" -e homolog
 ```
 
-#### 4. Combined Features
+#### 4. Safe Mode (`--safe-mode`)
+
+Safe mode lets you specify critical or high-traffic table names to watch for in pending migrations. When a pending migration's SQL references one of those tables, the tool warns you and — depending on the `--safe-mode-confirm` option — either prompts for confirmation or aborts with an error.
+
+**CLI Flags (on `up` command):**
+- `--safe-mode <TABLES>` — comma-separated list of table names to monitor
+- `--safe-mode-confirm <ask|exit-with-error>` — action when an unacknowledged table is found (default: `ask`)
+
+**Acknowledgement persistence (`safe-mode.yml`):**
+
+Once you confirm a migration interactively (`ask` mode), the table is saved to `safe-mode.yml` inside the migrations directory. Subsequent runs will not prompt again for that migration/table combination.
+
+```yaml
+# migrations/safe-mode.yml (auto-managed)
+migrations:
+  000003_alter_users.up.sql:
+    - users
+  000005_reindex_orders.up.sql:
+    - orders
+```
+
+**Example: Interactive prompt (default)**
+
+```bash
+# Watch for any migration that touches 'users' or 'orders'
+pgsql-migrate up \
+  -d "postgres://user:pass@localhost/db" \
+  --safe-mode "users,orders"
+
+# Output:
+#   WARNING: Safe-mode table(s) [users] found in migration 000003_alter_users.up.sql.
+#   This migration may affect large or critical tables — review carefully before applying to production.
+#   Apply this migration? (y/N): y
+#   Applying migration: 000003_alter_users.up.sql
+#     Applied successfully
+```
+
+**Example: CI/CD mode (fail on unacknowledged tables)**
+
+Use `exit-with-error` in pipelines where interactive prompts are not possible. Pre-acknowledge migrations by committing `safe-mode.yml` to your repository.
+
+```bash
+pgsql-migrate up \
+  -d "postgres://user:pass@localhost/db" \
+  --safe-mode "users,orders,payments" \
+  --safe-mode-confirm exit-with-error
+
+# If an unacknowledged migration is found:
+#   ERROR: Unacknowledged table(s) [users] in migration 000003_alter_users.up.sql.
+#   Add them to safe-mode.yml or remove --safe-mode-confirm=exit-with-error to be prompted.
+#   (exits with non-zero status)
+```
+
+**Workflow: Pre-acknowledging migrations for CI/CD**
+
+```bash
+# 1. Run locally with --safe-mode to review and acknowledge migrations
+pgsql-migrate up \
+  -d "postgres://user:pass@localhost/db" \
+  --safe-mode "users,orders"
+# Answer 'y' to each prompt — acknowledgements are saved to migrations/safe-mode.yml
+
+# 2. Commit safe-mode.yml to your repository
+git add migrations/safe-mode.yml
+git commit -m "acknowledge migration 000003 touching users table"
+
+# 3. CI/CD runs without prompts — already-acknowledged migrations are skipped
+pgsql-migrate up \
+  -d "$DATABASE_URL" \
+  --safe-mode "users,orders" \
+  --safe-mode-confirm exit-with-error
+```
+
+#### 5. Combined Features
 
 You can combine features for complex scenarios:
 
@@ -518,16 +597,18 @@ The tool automatically:
 - **Content changes**: Warns when applied migration content has changed
 - **Validation**: Ensures proper marker pairing in split-statements feature
 - **Transaction safety**: Automatically handles transaction wrapping based on features
+- **Safe mode abort**: When `--safe-mode-confirm exit-with-error` is set and an unacknowledged critical table is found, the migration is aborted before any SQL is executed
 
 ### Use Cases
 
 **Perfect for:**
 - **Database schema evolution** with complex dependencies
-- **Creating multiple materialized views** that need separate execution contexts  
+- **Creating multiple materialized views** that need separate execution contexts
 - **Concurrent index creation** without blocking operations
 - **Data migrations** that require multi-step processing
 - **Permission management** across multiple database objects
 - **Performance optimizations** that need specific execution patterns
+- **Protecting critical tables** in production with safe mode guards
 
 **Example: Complex E-commerce Migration**
 
