@@ -46,4 +46,8 @@ impl SafeConfig {
             tables.push(table.to_lowercase());
         }
     }
+
+    pub fn remove_migration(&mut self, script: &str) {
+        self.migrations.remove(script);
+    }
 }

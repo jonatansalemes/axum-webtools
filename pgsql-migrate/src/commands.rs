@@ -327,6 +327,9 @@ pub async fn run_down(
     let migration_map: std::collections::HashMap<u32, Migration> =
         migrations.into_iter().map(|m| (m.version, m)).collect();
 
+    let safe_yml_path = Path::new(path).join("safe-mode.yml");
+    let mut safe_config = SafeConfig::load(&safe_yml_path);
+
     let mut versions_to_rollback: Vec<i64> = applied.iter().map(|(v, _, _)| *v).collect();
     versions_to_rollback.reverse();
     versions_to_rollback.truncate(count as usize);
@@ -429,6 +432,11 @@ pub async fn run_down(
                         .await?;
                     println!("  Rolled back successfully");
                     rolled_back_count += 1;
+
+                    safe_config.remove_migration(&migration.filename);
+                    if safe_yml_path.exists() {
+                        safe_config.save(&safe_yml_path)?;
+                    }
                 }
                 Err(e) => {
                     eprintln!(
@@ -543,6 +551,8 @@ pub async fn run_redo(
     path: &str,
     database: &str,
     env: &str,
+    safe_mode_tables: &[String],
+    safe_mode_confirm: &SafeModeConfirm,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = PgPoolOptions::new()
         .max_connections(1)
@@ -572,7 +582,7 @@ pub async fn run_redo(
         .execute(&pool)
         .await?;
 
-    run_up(path, database, env, &[], &SafeModeConfirm::Ask).await?;
+    run_up(path, database, env, safe_mode_tables, safe_mode_confirm).await?;
 
     Ok(())
 }

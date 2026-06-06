@@ -99,8 +99,25 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             path,
             database,
             env,
+            safe_mode,
+            safe_mode_confirm,
         } => {
-            run_redo(&path, &database, &env).await?;
+            let safe_mode_tables: Vec<String> = safe_mode
+                .as_deref()
+                .unwrap_or("")
+                .split(',')
+                .map(|t| t.trim().to_lowercase())
+                .filter(|t| !t.is_empty())
+                .collect();
+
+            run_redo(
+                &path,
+                &database,
+                &env,
+                &safe_mode_tables,
+                &safe_mode_confirm,
+            )
+            .await?;
         }
         Commands::Backup {
             database,
