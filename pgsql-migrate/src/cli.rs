@@ -91,6 +91,21 @@ pub enum Commands {
 
         #[arg(short = 'e', long = "env", default_value = "prod")]
         env: String,
+
+        #[arg(
+            long = "safe-mode",
+            value_name = "TABLES",
+            help = "Comma-separated table names to watch for in pending migrations"
+        )]
+        safe_mode: Option<String>,
+
+        #[arg(
+            long = "safe-mode-confirm",
+            value_enum,
+            default_value = "ask",
+            help = "Action when unacknowledged safe-mode table found: ask (default) or exit-with-error"
+        )]
+        safe_mode_confirm: SafeModeConfirm,
     },
     #[command(name = "backup")]
     Backup {
