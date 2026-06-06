@@ -58,6 +58,12 @@ pub enum Commands {
 
         #[arg(default_value = "1")]
         count: u32,
+
+        #[arg(
+            long = "safe-mode-skip-auto-remove",
+            help = "Skip automatic removal of safe-mode.yml entries when rolling back"
+        )]
+        safe_mode_skip_auto_remove: bool,
     },
 
     #[command(name = "create")]

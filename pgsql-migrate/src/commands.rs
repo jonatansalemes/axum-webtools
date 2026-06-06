@@ -307,6 +307,7 @@ pub async fn run_down(
     database: &str,
     env: &str,
     count: u32,
+    safe_mode_skip_auto_remove: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running rollback in environment: {}", env);
     let pool = PgPoolOptions::new()
@@ -433,9 +434,11 @@ pub async fn run_down(
                     println!("  Rolled back successfully");
                     rolled_back_count += 1;
 
-                    safe_config.remove_migration(&migration.filename);
-                    if safe_yml_path.exists() {
-                        safe_config.save(&safe_yml_path)?;
+                    if !safe_mode_skip_auto_remove {
+                        safe_config.remove_migration(&migration.filename);
+                        if safe_yml_path.exists() {
+                            safe_config.save(&safe_yml_path)?;
+                        }
                     }
                 }
                 Err(e) => {

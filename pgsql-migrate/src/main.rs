@@ -67,6 +67,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             database,
             env,
             count,
+            safe_mode_skip_auto_remove,
         } => {
             let resolved_path =
                 resolve_config_value(path, "MIGRATIONS_DIR", Some("migrations"), "path")?;
@@ -83,7 +84,14 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  Count:    {}", count);
             println!();
 
-            run_down(&resolved_path, &resolved_database, &resolved_env, count).await?;
+            run_down(
+                &resolved_path,
+                &resolved_database,
+                &resolved_env,
+                count,
+                safe_mode_skip_auto_remove,
+            )
+            .await?;
         }
         Commands::Create { dir, name } => {
             create_migration(&dir, &name)?;
