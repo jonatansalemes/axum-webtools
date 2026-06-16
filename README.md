@@ -2,6 +2,22 @@
 
 General purpose tools for axum web framework.
 
+## Docker images
+
+axum-webtools images is available on Docker Hub: 
+
+   - https://hub.docker.com/r/jslsolucoes/axum-webtools-pgsql-migrate-pg16
+   - https://hub.docker.com/r/jslsolucoes/axum-webtools-pgsql-migrate-pg17
+   - https://hub.docker.com/r/jslsolucoes/axum-webtools-dlq-redrive
+
+## Crates
+
+axum-webtools is a collection of crates that provide various tools and utilities for the axum web framework.
+
+   - https://crates.io/crates/axum-webtools-pgsql-migrate
+   - https://crates.io/crates/axum-webtools-dlq-redrive
+   - https://crates.io/crates/axum-webtools
+
 ## Usage example with some features
 
 * `with_tx` function to run SQLX transactions in Axum web framework.
@@ -459,7 +475,7 @@ pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup.sql -f pla
 pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup_dir -f directory -c 5
 
 # Backup without ownership and ACL information
-pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup.dump --no-owner --no-acl
+pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup.dump --no-owner --no-acl --max-retain-days 10
 ```
 
 **Backup Parameters:**
@@ -469,6 +485,7 @@ pgsql-migrate backup -d "postgres://user:pass@localhost/db" -o backup.dump --no-
 - `-c, --compress`: Compression level 0-9 (not supported for plain format)
 - `--no-owner`: Exclude ownership information from backup
 - `--no-acl`: Exclude access control list (ACL) information from backup
+- `--max-retain-days`: Maximum number of days to retain backups (default: 15). Routine will use file metadata created timestamps to delete old backups.
 
 **Supported Formats:**
 - **custom** (recommended): Compressed binary format, restorable with pg_restore, allows selective restore

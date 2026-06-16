@@ -7,14 +7,18 @@ x-template: &template
   depends_on:
     kafka:
       condition: service_healthy
-    pgsql:
+    pgsql-16:
+      condition: service_healthy
+    pgsql-17:
+      condition: service_healthy
+    pgsql-18:
       condition: service_healthy
   environment:
     ENV: dev
     RUST_LOG: INFO
     RUST_BACKTRACE: FULL
     KAFKA_BROKERS: kafka:9092
-    DATABASE_URL: postgres://pgsqlmigrate:pgsqlmigrate@pgsql:5432/pgsqlmigrate
+    DATABASE_URL: postgres://pgsqlmigrate:pgsqlmigrate@pgsql-18:5432/pgsqlmigrate
   volumes:
     - ./:/app
     - cargo_registry:/usr/local/cargo/registry
@@ -55,8 +59,8 @@ services:
       target: prod-pgsql-migrate-pg16
     image: axum-webtools-prod-pgsql-migrate-pg16
 
-  pgsql:
-    image: postgres:18-alpine
+  pgsql-16:
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: pgsqlmigrate
       POSTGRES_PASSWORD: pgsqlmigrate
@@ -73,6 +77,45 @@ services:
     restart: unless-stopped
     networks:
       - axum-webtools-network
+
+  pgsql-17:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pgsqlmigrate
+      POSTGRES_PASSWORD: pgsqlmigrate
+      POSTGRES_DB: pgsqlmigrate
+    volumes:
+      - db_data:/var/lib/postgresql
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "pgsqlmigrate" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - axum-webtools-network
+
+  pgsql-18:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: pgsqlmigrate
+      POSTGRES_PASSWORD: pgsqlmigrate
+      POSTGRES_DB: pgsqlmigrate
+    volumes:
+      - db_data:/var/lib/postgresql
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "pgsqlmigrate" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - axum-webtools-network
+
 
   kafka:
     image: confluentinc/cp-kafka:8.2.1
