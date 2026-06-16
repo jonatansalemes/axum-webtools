@@ -135,6 +135,9 @@ pub enum Commands {
 
         #[arg(long = "no-acl")]
         no_acl: bool,
+
+        #[arg(long = "max-retain-days", default_value = "15")]
+        max_retain_days: Option<u64>,
     },
 
     #[command(name = "restore")]

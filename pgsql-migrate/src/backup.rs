@@ -141,6 +141,7 @@ pub fn get_pg_dump_version() -> Result<u32, Box<dyn std::error::Error>> {
 ///
 /// # Returns
 /// * `Ok(())` if backup completed successfully
+#[allow(clippy::too_many_arguments)]
 pub async fn run_backup(
     database: &str,
     output: &str,
@@ -149,6 +150,7 @@ pub async fn run_backup(
     jobs: Option<u8>,
     no_owner: bool,
     no_acl: bool,
+    max_retain_days: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !command_exists("pg_dump") {
         return Err("pg_dump command not found. Please install PostgreSQL client tools. Example: sudo apt update && sudo apt install postgresql-client-16".into());
@@ -270,6 +272,11 @@ pub async fn run_backup(
         if no_acl {
             println!("  No ACL information");
         }
+
+        if let Some(days) = max_retain_days {
+            purge_old_backups(output, days)?;
+        }
+
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output_result.stderr);
@@ -442,4 +449,47 @@ pub fn is_plain_sql_file(path: &str) -> Result<bool, Box<dyn std::error::Error>>
         .all(|&b| b.is_ascii() || b == b'\n' || b == b'\r' || b == b'\t');
 
     Ok(!is_custom && is_text)
+}
+
+fn purge_old_backups(
+    output_path: &str,
+    max_retain_days: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = Path::new(output_path);
+    let parent_dir = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+
+    println!(
+        "Scanning for old backups in {} (max retain days: {})...",
+        parent_dir.display(),
+        max_retain_days
+    );
+
+    let now = std::time::SystemTime::now();
+    let max_duration = std::time::Duration::from_secs(max_retain_days * 24 * 60 * 60);
+
+    for entry in std::fs::read_dir(parent_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "dump") {
+            let metadata = entry.metadata()?;
+
+            let modified = metadata.modified()?;
+            let created = metadata.created().unwrap_or(modified);
+
+            let created_elapsed = now
+                .duration_since(created)
+                .unwrap_or(std::time::Duration::ZERO);
+
+            if created_elapsed > max_duration {
+                println!("Purging old backup: {}", path.display());
+                std::fs::remove_file(path)?;
+            }
+        }
+    }
+
+    Ok(())
 }
