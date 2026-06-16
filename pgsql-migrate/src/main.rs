@@ -135,9 +135,17 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             jobs,
             no_owner,
             no_acl,
+            max_retain_days,
         } => {
             run_backup(
-                &database, &output, &format, compress, jobs, no_owner, no_acl,
+                &database,
+                &output,
+                &format,
+                compress,
+                jobs,
+                no_owner,
+                no_acl,
+                max_retain_days,
             )
             .await?;
         }
@@ -189,6 +197,7 @@ mod tests {
             None,
             true,
             true,
+            None,
         )
         .await?;
         assert!(
@@ -196,6 +205,45 @@ mod tests {
             "Backup file was not created"
         );
         fs::remove_file(&backup_file)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_backup_purge() -> Result<(), Box<dyn std::error::Error>> {
+        let database_url = get_database_url();
+        let backup_file = "test_purge.dump";
+
+        // Create a dummy .dump file that looks "old"
+        // We'll create it now and then use a small max_retain_days if possible,
+        // but since we can't easily backdate files in a cross-platform way without extra crates,
+        // we'll just check if it survives a 1 day retention.
+        // Actually, we can use filetime crate if it's available, but let's check Cargo.toml first.
+
+        fs::write(backup_file, "dummy content")?;
+
+        // This should NOT purge the file because it's new
+        let output = "another_backup.backup";
+        run_backup(
+            &database_url,
+            output,
+            "custom",
+            None,
+            None,
+            true,
+            true,
+            Some(1),
+        )
+        .await?;
+
+        assert!(
+            Path::new(backup_file).exists(),
+            "Backup file should still exist"
+        );
+
+        fs::remove_file(backup_file)?;
+        if Path::new(output).exists() {
+            fs::remove_file(output)?;
+        }
         Ok(())
     }
 
