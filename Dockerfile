@@ -32,6 +32,17 @@ RUN rm -rf ./src target/release/deps/pgsql_migrate*
 COPY ./pgsql-migrate/src ./src
 RUN cargo build --release
 
+FROM alpine:3.24 AS prod-pgsql-migrate-pg18
+RUN apk add --no-cache \
+    ca-certificates \
+    libpq \
+    postgresql18-client \
+    && rm -rf /var/cache/apk/*
+COPY --from=builder-pgsql-migrate --chown=65534:65534 /app/target/release/pgsql-migrate /usr/local/bin/pgsql-migrate
+USER 65534:65534
+ENTRYPOINT ["pgsql-migrate"]
+CMD ["-h"]
+
 FROM alpine:3.24 AS prod-pgsql-migrate-pg17
 RUN apk add --no-cache \
     ca-certificates \

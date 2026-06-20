@@ -43,6 +43,18 @@ pub enum Commands {
             help = "Action when unacknowledged safe-mode table found: ask (default) or exit-with-error"
         )]
         safe_mode_confirm: SafeModeConfirm,
+
+        #[arg(
+            long = "pre-execute",
+            help = "Comma-separated paths to SQL files to run before migrations"
+        )]
+        pre_execute: Option<String>,
+
+        #[arg(
+            long = "post-execute",
+            help = "Comma-separated paths to SQL files to run after migrations"
+        )]
+        post_execute: Option<String>,
     },
 
     #[command(name = "down")]
@@ -64,6 +76,18 @@ pub enum Commands {
             help = "Skip automatic removal of safe-mode.yml entries when rolling back"
         )]
         safe_mode_skip_auto_remove: bool,
+
+        #[arg(
+            long = "pre-execute",
+            help = "Comma-separated paths to SQL files to run before rollback"
+        )]
+        pre_execute: Option<String>,
+
+        #[arg(
+            long = "post-execute",
+            help = "Comma-separated paths to SQL files to run after rollback"
+        )]
+        post_execute: Option<String>,
     },
 
     #[command(name = "create")]
@@ -112,6 +136,18 @@ pub enum Commands {
             help = "Action when unacknowledged safe-mode table found: ask (default) or exit-with-error"
         )]
         safe_mode_confirm: SafeModeConfirm,
+
+        #[arg(
+            long = "pre-execute",
+            help = "Comma-separated paths to SQL files to run before redo"
+        )]
+        pre_execute: Option<String>,
+
+        #[arg(
+            long = "post-execute",
+            help = "Comma-separated paths to SQL files to run after redo"
+        )]
+        post_execute: Option<String>,
     },
     #[command(name = "backup")]
     Backup {
