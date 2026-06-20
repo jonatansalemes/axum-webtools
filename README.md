@@ -8,6 +8,7 @@ axum-webtools images is available on Docker Hub:
 
    - https://hub.docker.com/r/jslsolucoes/axum-webtools-pgsql-migrate-pg16
    - https://hub.docker.com/r/jslsolucoes/axum-webtools-pgsql-migrate-pg17
+   - https://hub.docker.com/r/jslsolucoes/axum-webtools-pgsql-migrate-pg18
    - https://hub.docker.com/r/jslsolucoes/axum-webtools-dlq-redrive
 
 ## Crates
@@ -411,6 +412,12 @@ pgsql-migrate up \
   -d "$DATABASE_URL" \
   --safe-mode "users,orders" \
   --safe-mode-confirm exit-with-error
+  
+# 4. Dev workflows
+pgsql-migrate up \
+  -d "$DATABASE_URL" \
+  --safe-mode "users,orders" \
+  --post-execute "./some-dev-script.sql,./another-dev-script.sql"
 ```
 
 #### 5. Combined Features
@@ -615,6 +622,7 @@ The tool automatically:
 - **Validation**: Ensures proper marker pairing in split-statements feature
 - **Transaction safety**: Automatically handles transaction wrapping based on features
 - **Safe mode abort**: When `--safe-mode-confirm exit-with-error` is set and an unacknowledged critical table is found, the migration is aborted before any SQL is executed
+- **Pre/Post hooks**: Allows for custom setup and teardown logic before and after migration operations
 
 ### Use Cases
 
