@@ -21,6 +21,9 @@ test: ## [Dev] Run tests for all packages
 test-pgsql-migrate: ## [Dev] Run tests for pgsql-migrate package
 	@docker compose run --rm task sh -c 'cargo test --package axum-webtools-pgsql-migrate --all-features'
 
+test-pgsql-migrate-e2e: ## [Dev] Run e2e tests for pgsql-migrate (inside container)
+	@docker compose run --rm task sh -c 'cargo r --bin pgsql-migrate -- up --database $$DATABASE_URL -p pgsql-migrate/ --post-execute pgsql-migrate/migrations-post-execute/some.sql'
+
 format: ## [Dev] Format code
 	@docker compose run --rm --no-deps task sh -c 'cargo fmt --all'
 

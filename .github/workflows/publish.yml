@@ -56,6 +56,8 @@ jobs:
             image: axum-webtools-pgsql-migrate-pg16
           - target: prod-pgsql-migrate-pg17
             image: axum-webtools-pgsql-migrate-pg17
+          - target: prod-pgsql-migrate-pg18
+            image: axum-webtools-pgsql-migrate-pg18
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

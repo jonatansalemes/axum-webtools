@@ -71,12 +71,41 @@ pub fn parse_migrations(dir: &Path) -> Result<Vec<Migration>, Box<dyn std::error
     Ok(migrations)
 }
 
+/// Executes the SQL files at the specified paths.
+///
+/// # Arguments
+/// * `paths` - A slice of strings containing file paths.
+/// * `pool` - Database connection pool
+///
+/// # Returns
+/// * `Ok(())` if all SQL files executed successfully
+async fn execute_hooks(
+    paths: &[String],
+    pool: &sqlx::PgPool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for path in paths {
+        println!("Executing hook SQL: {}", path);
+        let content = fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read hook file '{}': {}", path, e))?;
+
+        pool.execute(AssertSqlSafe(content.as_str()))
+            .await
+            .map_err(|e| format!("Failed to execute hook SQL from '{}': {}", path, e))?;
+    }
+
+    Ok(())
+}
+
 /// Runs pending up migrations against the database.
 ///
 /// # Arguments
 /// * `path` - Path to the migrations directory
 /// * `database` - Database connection URL
 /// * `env` - Environment name for conditional migration execution
+/// * `safe_mode_tables` - Table names to watch for in pending migrations
+/// * `safe_mode_confirm` - Action when unacknowledged safe-mode table found
+/// * `pre_execute` - Space-separated paths to scripts/programs to run before migrations
+/// * `post_execute` - Space-separated paths to scripts/programs to run after migrations
 ///
 /// # Returns
 /// * `Ok(())` if all migrations applied successfully
@@ -86,12 +115,18 @@ pub async fn run_up(
     env: &str,
     safe_mode_tables: &[String],
     safe_mode_confirm: &SafeModeConfirm,
+    pre_execute: &[String],
+    post_execute: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running migrations in environment: {}", env);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database)
         .await?;
+
+    if !pre_execute.is_empty() {
+        execute_hooks(pre_execute, &pool).await?;
+    }
 
     ensure_schema_migrations_table(&pool).await?;
     check_dirty_migrations(&pool).await?;
@@ -287,6 +322,10 @@ pub async fn run_up(
         println!("Applied {} migration(s).", applied_count);
     }
 
+    if !post_execute.is_empty() {
+        execute_hooks(post_execute, &pool).await?;
+    }
+
     print_current_version(&pool).await?;
 
     Ok(())
@@ -299,6 +338,9 @@ pub async fn run_up(
 /// * `database` - Database connection URL
 /// * `env` - Environment name for conditional migration execution
 /// * `count` - Number of migrations to roll back
+/// * `safe_mode_skip_auto_remove` - Skip automatic removal of safe-mode.yml entries
+/// * `pre_execute` - Space-separated paths to scripts/programs to run before rollback
+/// * `post_execute` - Space-separated paths to scripts/programs to run after rollback
 ///
 /// # Returns
 /// * `Ok(())` if all rollbacks completed successfully
@@ -308,12 +350,18 @@ pub async fn run_down(
     env: &str,
     count: u32,
     safe_mode_skip_auto_remove: bool,
+    pre_execute: &[String],
+    post_execute: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running rollback in environment: {}", env);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database)
         .await?;
+
+    if !pre_execute.is_empty() {
+        execute_hooks(pre_execute, &pool).await?;
+    }
 
     ensure_schema_migrations_table(&pool).await?;
     check_dirty_migrations(&pool).await?;
@@ -464,6 +512,10 @@ pub async fn run_down(
         println!("Rolled back {} migration(s).", rolled_back_count);
     }
 
+    if !post_execute.is_empty() {
+        execute_hooks(post_execute, &pool).await?;
+    }
+
     print_current_version(&pool).await?;
 
     Ok(())
@@ -547,6 +599,10 @@ pub async fn run_baseline(
 /// * `path` - Path to the migrations directory
 /// * `database` - Database connection URL
 /// * `env` - Environment name for conditional migration execution
+/// * `safe_mode_tables` - Table names to watch for in pending migrations
+/// * `safe_mode_confirm` - Action when unacknowledged safe-mode table found
+/// * `pre_execute` - Space-separated paths to scripts/programs to run before redo
+/// * `post_execute` - Space-separated paths to scripts/programs to run after redo
 ///
 /// # Returns
 /// * `Ok(())` if redo completed successfully
@@ -556,11 +612,17 @@ pub async fn run_redo(
     env: &str,
     safe_mode_tables: &[String],
     safe_mode_confirm: &SafeModeConfirm,
+    pre_execute: &[String],
+    post_execute: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database)
         .await?;
+
+    if !pre_execute.is_empty() {
+        execute_hooks(pre_execute, &pool).await?;
+    }
 
     ensure_schema_migrations_table(&pool).await?;
 
@@ -585,7 +647,102 @@ pub async fn run_redo(
         .execute(&pool)
         .await?;
 
-    run_up(path, database, env, safe_mode_tables, safe_mode_confirm).await?;
+    run_up(
+        path,
+        database,
+        env,
+        safe_mode_tables,
+        safe_mode_confirm,
+        &[], // Hooks already handled in run_redo or we don't want to run them twice
+        &[],
+    )
+    .await?;
+
+    if !post_execute.is_empty() {
+        execute_hooks(post_execute, &pool).await?;
+    }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn get_database_url() -> String {
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://pgsqlmigrate:pgsqlmigrate@pgsql:5432/pgsqlmigrate".to_string()
+        })
+    }
+
+    #[tokio::test]
+    async fn test_execute_hooks_success() -> Result<(), Box<dyn std::error::Error>> {
+        let database_url = get_database_url();
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await?;
+
+        let temp_dir = tempfile::tempdir()?;
+        let hook_path = temp_dir.path().join("hook.sql");
+        fs::write(&hook_path, "SELECT 1")?;
+
+        execute_hooks(&[hook_path.to_str().unwrap().to_string()], &pool).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_hooks_multiple_success() -> Result<(), Box<dyn std::error::Error>> {
+        let database_url = get_database_url();
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await?;
+
+        let temp_dir = tempfile::tempdir()?;
+        let hook1_path = temp_dir.path().join("hook1.sql");
+        let hook2_path = temp_dir.path().join("hook2.sql");
+        fs::write(&hook1_path, "SELECT 1")?;
+        fs::write(&hook2_path, "SELECT 2")?;
+
+        execute_hooks(
+            &[
+                hook1_path.to_str().unwrap().to_string(),
+                hook2_path.to_str().unwrap().to_string(),
+            ],
+            &pool,
+        )
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_hooks_failure() -> Result<(), Box<dyn std::error::Error>> {
+        let database_url = get_database_url();
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await?;
+
+        let temp_dir = tempfile::tempdir()?;
+        let hook_path = temp_dir.path().join("hook.sql");
+        fs::write(&hook_path, "INVALID SQL")?;
+
+        let result = execute_hooks(&[hook_path.to_str().unwrap().to_string()], &pool).await;
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_hooks_not_found() -> Result<(), Box<dyn std::error::Error>> {
+        let database_url = get_database_url();
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await?;
+
+        let result = execute_hooks(&["/non/existent/path".to_string()], &pool).await;
+        assert!(result.is_err());
+        Ok(())
+    }
 }

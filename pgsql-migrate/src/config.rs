@@ -142,3 +142,26 @@ pub fn create_migration(dir: &str, name: &str) -> Result<(), Box<dyn std::error:
 
     Ok(())
 }
+
+/// Normalizes comma-separated arguments by splitting, trimming, and filtering empty strings.
+///
+/// # Arguments
+/// * `arg` - The comma-separated string argument
+/// * `to_lowercase` - Whether to convert each element to lowercase
+///
+/// # Returns
+/// * A vector of normalized strings
+pub fn normalize_comma_separated_args(arg: Option<&str>, to_lowercase: bool) -> Vec<String> {
+    arg.unwrap_or("")
+        .split(',')
+        .map(|s| {
+            let s = s.trim();
+            if to_lowercase {
+                s.to_lowercase()
+            } else {
+                s.to_string()
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .collect()
+}

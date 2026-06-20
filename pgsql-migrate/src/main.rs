@@ -27,6 +27,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             env,
             safe_mode,
             safe_mode_confirm,
+            pre_execute,
+            post_execute,
         } => {
             let resolved_path =
                 resolve_config_value(path, "MIGRATIONS_DIR", Some("migrations"), "path")?;
@@ -36,13 +38,11 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let resolved_env = resolve_config_value(env, "ENV", Some("prod"), "env")?;
 
-            let safe_mode_tables: Vec<String> = safe_mode
-                .as_deref()
-                .unwrap_or("")
-                .split(',')
-                .map(|t| t.trim().to_lowercase())
-                .filter(|t| !t.is_empty())
-                .collect();
+            let safe_mode_tables = normalize_comma_separated_args(safe_mode.as_deref(), true);
+
+            let pre_execute_hooks = normalize_comma_separated_args(pre_execute.as_deref(), false);
+
+            let post_execute_hooks = normalize_comma_separated_args(post_execute.as_deref(), false);
 
             println!("Running migrations with:");
             println!("  Path:     {}", resolved_path);
@@ -59,6 +59,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &resolved_env,
                 &safe_mode_tables,
                 &safe_mode_confirm,
+                &pre_execute_hooks,
+                &post_execute_hooks,
             )
             .await?;
         }
@@ -68,6 +70,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             env,
             count,
             safe_mode_skip_auto_remove,
+            pre_execute,
+            post_execute,
         } => {
             let resolved_path =
                 resolve_config_value(path, "MIGRATIONS_DIR", Some("migrations"), "path")?;
@@ -76,6 +80,10 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 resolve_config_value(database, "DATABASE_URL", None, "database")?;
 
             let resolved_env = resolve_config_value(env, "ENV", Some("prod"), "env")?;
+
+            let pre_execute_hooks = normalize_comma_separated_args(pre_execute.as_deref(), false);
+
+            let post_execute_hooks = normalize_comma_separated_args(post_execute.as_deref(), false);
 
             println!("Rolling back migrations with:");
             println!("  Path:     {}", resolved_path);
@@ -90,6 +98,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &resolved_env,
                 count,
                 safe_mode_skip_auto_remove,
+                &pre_execute_hooks,
+                &post_execute_hooks,
             )
             .await?;
         }
@@ -109,14 +119,14 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             env,
             safe_mode,
             safe_mode_confirm,
+            pre_execute,
+            post_execute,
         } => {
-            let safe_mode_tables: Vec<String> = safe_mode
-                .as_deref()
-                .unwrap_or("")
-                .split(',')
-                .map(|t| t.trim().to_lowercase())
-                .filter(|t| !t.is_empty())
-                .collect();
+            let safe_mode_tables = normalize_comma_separated_args(safe_mode.as_deref(), true);
+
+            let pre_execute_hooks = normalize_comma_separated_args(pre_execute.as_deref(), false);
+
+            let post_execute_hooks = normalize_comma_separated_args(post_execute.as_deref(), false);
 
             run_redo(
                 &path,
@@ -124,6 +134,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &env,
                 &safe_mode_tables,
                 &safe_mode_confirm,
+                &pre_execute_hooks,
+                &post_execute_hooks,
             )
             .await?;
         }
@@ -339,6 +351,22 @@ mod tests {
         assert_eq!(info.port, "5432");
         assert_eq!(info.database, "my-db");
         Ok(())
+    }
+
+    #[test]
+    fn test_normalize_comma_separated_args() {
+        let arg = Some(" a, B , , c ");
+        let result = normalize_comma_separated_args(arg, true);
+        assert_eq!(result, vec!["a", "b", "c"]);
+
+        let result = normalize_comma_separated_args(arg, false);
+        assert_eq!(result, vec!["a", "B", "c"]);
+
+        let result = normalize_comma_separated_args(None, true);
+        assert!(result.is_empty());
+
+        let result = normalize_comma_separated_args(Some(""), true);
+        assert!(result.is_empty());
     }
 
     #[test]
