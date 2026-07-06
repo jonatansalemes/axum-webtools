@@ -331,6 +331,72 @@ pub async fn run_up(
     Ok(())
 }
 
+/// Reports whether the database has any pending migrations, without applying
+/// anything. Read-only: intended as a readiness/ordering gate (e.g. an init
+/// container that must wait for migrations before running).
+///
+/// # Arguments
+/// * `path` - Path to the migrations directory
+/// * `database` - Database connection URL
+/// * `env` - Environment name (informational; pending state is version-based)
+///
+/// # Returns
+/// * `Ok(0)` if the database is up to date (every on-disk migration applied)
+/// * `Ok(1)` if one or more migrations are pending
+///
+/// A dirty migration or an unreachable database is returned as `Err`, which the
+/// caller maps to exit code 2.
+pub async fn run_status(
+    path: &str,
+    database: &str,
+    env: &str,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    println!("Checking migration status in environment: {}", env);
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database)
+        .await?;
+
+    ensure_schema_migrations_table(&pool).await?;
+    check_dirty_migrations(&pool).await?; // dirty migration -> Err -> exit 2
+
+    let applied = get_applied_migrations(&pool).await?;
+    let applied_versions: std::collections::HashSet<i64> =
+        applied.iter().map(|(v, _, _)| *v).collect();
+
+    let migrations = parse_migrations(Path::new(path))?;
+    let pending: Vec<u32> = migrations
+        .iter()
+        .filter(|m| !applied_versions.contains(&(m.version as i64)))
+        .map(|m| m.version)
+        .collect();
+
+    match applied_versions.iter().max() {
+        Some(version) => println!("Applied version: {}", version),
+        None => println!("Applied version: none (no migrations applied)"),
+    }
+
+    if pending.is_empty() {
+        println!(
+            "Status: up to date ({} migration(s) applied)",
+            migrations.len()
+        );
+        Ok(0)
+    } else {
+        let pending_list = pending
+            .iter()
+            .map(|version| format!("{:06}", version))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "Status: {} migration(s) pending: {}",
+            pending.len(),
+            pending_list
+        );
+        Ok(1)
+    }
+}
+
 /// Rolls back the specified number of migrations.
 ///
 /// # Arguments
@@ -743,6 +809,161 @@ mod tests {
 
         let result = execute_hooks(&["/non/existent/path".to_string()], &pool).await;
         assert!(result.is_err());
+        Ok(())
+    }
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static SCHEMA_SEQ: AtomicU32 = AtomicU32::new(0);
+
+    /// Creates a fresh, uniquely-named Postgres schema and returns a connection
+    /// URL scoped to it via `search_path`. This isolates the shared
+    /// `pgsql_migrate_schema_migrations` table that `run_status` reads so these
+    /// tests can run in parallel without clobbering each other's applied state.
+    async fn isolated_schema_url() -> Result<String, Box<dyn std::error::Error>> {
+        let base_url = get_database_url();
+        let admin = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&base_url)
+            .await?;
+
+        let seq = SCHEMA_SEQ.fetch_add(1, Ordering::SeqCst);
+        let schema = format!("status_test_{}_{}", std::process::id(), seq);
+        admin
+            .execute(AssertSqlSafe(
+                format!("DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}").as_str(),
+            ))
+            .await?;
+
+        let sep = if base_url.contains('?') { '&' } else { '?' };
+        Ok(format!(
+            "{base_url}{sep}options=-c%20search_path%3D{schema}"
+        ))
+    }
+
+    /// Writes a minimal up/down migration pair into `dir` for the given version,
+    /// matching the `NNNNNN_name.{up,down}.sql` layout `parse_migrations` expects.
+    fn write_migration(dir: &Path, version: u32, name: &str) -> io::Result<()> {
+        let stem = format!("{version:06}_{name}");
+        fs::write(dir.join(format!("{stem}.up.sql")), "SELECT 1")?;
+        fs::write(dir.join(format!("{stem}.down.sql")), "SELECT 1")?;
+        Ok(())
+    }
+
+    /// Records a migration version as applied in the (schema-scoped) tracking table.
+    async fn mark_applied(
+        pool: &sqlx::PgPool,
+        version: i64,
+        dirty: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        sqlx::query(
+            "INSERT INTO pgsql_migrate_schema_migrations (version, dirty, content_hash) \
+             VALUES ($1, $2, $3)",
+        )
+        .bind(version)
+        .bind(dirty)
+        .bind("deadbeef")
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_run_status_up_to_date() -> Result<(), Box<dyn std::error::Error>> {
+        let url = isolated_schema_url().await?;
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await?;
+        ensure_schema_migrations_table(&pool).await?;
+
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(temp_dir.path(), 1, "init")?;
+        write_migration(temp_dir.path(), 2, "next")?;
+        mark_applied(&pool, 1, false).await?;
+        mark_applied(&pool, 2, false).await?;
+
+        let code = run_status(temp_dir.path().to_str().unwrap(), &url, "test").await?;
+        assert_eq!(
+            code, 0,
+            "every on-disk migration applied should report up to date"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_run_status_pending() -> Result<(), Box<dyn std::error::Error>> {
+        let url = isolated_schema_url().await?;
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await?;
+        ensure_schema_migrations_table(&pool).await?;
+
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(temp_dir.path(), 1, "init")?;
+        write_migration(temp_dir.path(), 2, "next")?;
+        mark_applied(&pool, 1, false).await?; // v2 left unapplied
+
+        let code = run_status(temp_dir.path().to_str().unwrap(), &url, "test").await?;
+        assert_eq!(
+            code, 1,
+            "an unapplied on-disk migration should report pending"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_run_status_empty_database_is_pending() -> Result<(), Box<dyn std::error::Error>> {
+        let url = isolated_schema_url().await?;
+
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(temp_dir.path(), 1, "init")?;
+
+        // No table/rows yet: run_status must create the table itself and still
+        // report the on-disk migration as pending.
+        let code = run_status(temp_dir.path().to_str().unwrap(), &url, "test").await?;
+        assert_eq!(
+            code, 1,
+            "fresh database with on-disk migrations should be pending"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_run_status_no_migrations_is_up_to_date() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let url = isolated_schema_url().await?;
+
+        // Empty migrations directory and empty database: nothing pending.
+        let temp_dir = tempfile::tempdir()?;
+
+        let code = run_status(temp_dir.path().to_str().unwrap(), &url, "test").await?;
+        assert_eq!(
+            code, 0,
+            "no migrations on disk and none applied is up to date"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_run_status_dirty_migration_errors() -> Result<(), Box<dyn std::error::Error>> {
+        let url = isolated_schema_url().await?;
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await?;
+        ensure_schema_migrations_table(&pool).await?;
+
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(temp_dir.path(), 1, "init")?;
+        mark_applied(&pool, 1, true).await?; // dirty row -> exit code 2 upstream
+
+        let result = run_status(temp_dir.path().to_str().unwrap(), &url, "test").await;
+        assert!(
+            result.is_err(),
+            "a dirty migration must surface as an error, not a status code"
+        );
         Ok(())
     }
 }

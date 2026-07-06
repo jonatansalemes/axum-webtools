@@ -103,6 +103,30 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
         }
+        Commands::Status {
+            path,
+            database,
+            env,
+        } => {
+            let resolved_path =
+                resolve_config_value(path, "MIGRATIONS_DIR", Some("migrations"), "path")?;
+
+            let resolved_database =
+                resolve_config_value(database, "DATABASE_URL", None, "database")?;
+
+            let resolved_env = resolve_config_value(env, "ENV", Some("prod"), "env")?;
+
+            // Distinct exit codes let callers gate on status without parsing stdout:
+            //   0 = up to date, 1 = pending, 2 = dirty/unreachable.
+            let code = match run_status(&resolved_path, &resolved_database, &resolved_env).await {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    2
+                }
+            };
+            std::process::exit(code);
+        }
         Commands::Create { dir, name } => {
             create_migration(&dir, &name)?;
         }
