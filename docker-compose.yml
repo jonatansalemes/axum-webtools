@@ -126,7 +126,7 @@ services:
 
 
   kafka:
-    image: confluentinc/cp-kafka:8.2.1
+    image: confluentinc/cp-kafka:8.3.0
     environment:
       CLUSTER_ID: qv6BBXI9TKuOcPZWfd89as
       KAFKA_PROCESS_ROLES: broker,controller
