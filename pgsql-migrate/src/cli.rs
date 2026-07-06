@@ -90,6 +90,18 @@ pub enum Commands {
         post_execute: Option<String>,
     },
 
+    #[command(name = "status")]
+    Status {
+        #[arg(short = 'p', long = "path")]
+        path: Option<String>,
+
+        #[arg(short = 'd', long = "database")]
+        database: Option<String>,
+
+        #[arg(short = 'e', long = "env")]
+        env: Option<String>,
+    },
+
     #[command(name = "create")]
     Create {
         #[arg(short = 'd', long = "dir", default_value = "migrations")]
