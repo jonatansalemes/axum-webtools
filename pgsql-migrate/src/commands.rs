@@ -96,6 +96,44 @@ async fn execute_hooks(
     Ok(())
 }
 
+/// Checks whether `content` references `table` as a whole SQL identifier.
+///
+/// Uses identifier boundaries (`[a-z0-9_]`) so a shorter name does not match
+/// inside a longer one — e.g. `devices_data` must not match `devices_data_exports`.
+/// Both `content` and `table` are expected to be lowercase.
+fn content_references_table(content: &str, table: &str) -> bool {
+    if table.is_empty() {
+        return false;
+    }
+
+    let is_ident_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let bytes = content.as_bytes();
+    let table_len = table.len();
+    let mut search_start = 0;
+
+    while let Some(rel) = content[search_start..].find(table) {
+        let start = search_start + rel;
+        let end = start + table_len;
+
+        let prev_is_ident = start
+            .checked_sub(1)
+            .map(|i| is_ident_char(bytes[i] as char))
+            .unwrap_or(false);
+        let next_is_ident = bytes
+            .get(end)
+            .map(|&b| is_ident_char(b as char))
+            .unwrap_or(false);
+
+        if !prev_is_ident && !next_is_ident {
+            return true;
+        }
+
+        search_start = start + 1;
+    }
+
+    false
+}
+
 /// Runs pending up migrations against the database.
 ///
 /// # Arguments
@@ -165,7 +203,7 @@ pub async fn run_up(
             let content_lower = migration.up.content.to_lowercase();
             let found_tables: Vec<&str> = safe_mode_tables
                 .iter()
-                .filter(|t| content_lower.contains(t.as_str()))
+                .filter(|t| content_references_table(&content_lower, t.as_str()))
                 .map(|t| t.as_str())
                 .collect();
 
@@ -739,6 +777,58 @@ mod tests {
         std::env::var("DATABASE_URL").unwrap_or_else(|_| {
             "postgres://pgsqlmigrate:pgsqlmigrate@pgsql:5432/pgsqlmigrate".to_string()
         })
+    }
+
+    #[test]
+    fn test_content_references_table_exact_match() {
+        let sql = "alter table devices_data add column foo int;".to_lowercase();
+        assert!(content_references_table(&sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_content_references_table_ignores_longer_name() {
+        // `devices_data` must not match inside `devices_data_exports`.
+        let sql = "alter table devices_data_exports add column foo int;".to_lowercase();
+        assert!(!content_references_table(&sql, "devices_data"));
+        assert!(content_references_table(&sql, "devices_data_exports"));
+    }
+
+    #[test]
+    fn test_content_references_table_ignores_prefix_of_identifier() {
+        // A table name that is a prefix but not a whole identifier must not match.
+        let sql = "create table my_devices_data (id int);".to_lowercase();
+        assert!(!content_references_table(&sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_content_references_table_schema_qualified() {
+        let sql = "alter table public.devices_data add column foo int;".to_lowercase();
+        assert!(content_references_table(&sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_content_references_table_quoted_identifier() {
+        let sql = "alter table \"devices_data\" add column foo int;".to_lowercase();
+        assert!(content_references_table(&sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_content_references_table_multiple_occurrences() {
+        // First occurrence is part of a longer name, second is an exact match.
+        let sql = "select * from devices_data_exports; drop table devices_data;".to_lowercase();
+        assert!(content_references_table(&sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_content_references_table_no_match() {
+        let sql = "alter table users add column foo int;".to_lowercase();
+        assert!(!content_references_table(&sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_content_references_table_empty_table() {
+        let sql = "alter table users;".to_lowercase();
+        assert!(!content_references_table(&sql, ""));
     }
 
     #[tokio::test]
