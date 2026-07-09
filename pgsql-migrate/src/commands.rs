@@ -178,7 +178,7 @@ pub async fn run_up(
     let migrations = parse_migrations(Path::new(path))?;
 
     let safe_yml_path = Path::new(path).join("safe-mode.yml");
-    let mut safe_config = SafeConfig::load(&safe_yml_path);
+    let mut safe_config = SafeConfig::load(&safe_yml_path)?;
 
     let mut applied_count = 0;
     for migration in migrations {
@@ -481,7 +481,7 @@ pub async fn run_down(
         migrations.into_iter().map(|m| (m.version, m)).collect();
 
     let safe_yml_path = Path::new(path).join("safe-mode.yml");
-    let mut safe_config = SafeConfig::load(&safe_yml_path);
+    let mut safe_config = SafeConfig::load(&safe_yml_path)?;
 
     let mut versions_to_rollback: Vec<i64> = applied.iter().map(|(v, _, _)| *v).collect();
     versions_to_rollback.reverse();
