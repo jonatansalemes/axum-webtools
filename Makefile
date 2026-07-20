@@ -7,7 +7,7 @@ help: ## [Helper] Show help
 	@fgrep -h "##" $(MAKEFILE_LIST) | fgrep -v fgrep | sort -t ':' -k2,2 | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 docker-build: ## [Dev] Build Docker images
-	@docker compose build
+	@docker compose build --pull $(or $(flags),)
 
 update-deps: ## [Dev] Update dependencies
 	@docker compose run --rm --no-deps task sh -c 'cargo upgrade'

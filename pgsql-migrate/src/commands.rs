@@ -96,6 +96,93 @@ async fn execute_hooks(
     Ok(())
 }
 
+/// Removes SQL comments (`-- ...` line comments and nested `/* ... */` block
+/// comments) from `sql` so a table name that only appears in a comment does
+/// not trip safe mode. Each comment is replaced with a single space to keep
+/// identifier boundaries intact.
+///
+/// Comment markers inside single-quoted, double-quoted, or dollar-quoted
+/// strings are part of the literal, not comments, so those spans are copied
+/// through verbatim. That also keeps dynamic SQL in `DO $$ ... $$` blocks
+/// visible to safe mode, which can genuinely reference a watched table.
+fn strip_sql_comments(sql: &str) -> String {
+    let bytes = sql.as_bytes();
+    let len = bytes.len();
+    let mut out: Vec<u8> = Vec::with_capacity(len);
+    let mut i = 0;
+
+    while i < len {
+        match bytes[i] {
+            b'-' if bytes.get(i + 1) == Some(&b'-') => {
+                // Line comment: drop up to (not including) the newline.
+                i = sql[i..].find('\n').map(|n| i + n).unwrap_or(len);
+                out.push(b' ');
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                // Block comment; PostgreSQL block comments nest.
+                let mut depth = 1;
+                i += 2;
+                while i < len && depth > 0 {
+                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                        depth += 1;
+                        i += 2;
+                    } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                out.push(b' ');
+            }
+            quote @ (b'\'' | b'"') => {
+                let mut j = i + 1;
+                while j < len {
+                    if bytes[j] == quote {
+                        if quote == b'\'' && bytes.get(j + 1) == Some(&b'\'') {
+                            j += 2; // '' escapes a quote inside the literal
+                        } else {
+                            j += 1;
+                            break;
+                        }
+                    } else {
+                        j += 1;
+                    }
+                }
+                out.extend_from_slice(&bytes[i..j]);
+                i = j;
+            }
+            b'$' => {
+                // Possible dollar-quoted string: $tag$ ... $tag$.
+                let tag_end = sql[i + 1..]
+                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .map(|n| i + 1 + n);
+                if let Some(tag_end) = tag_end.filter(|&t| bytes[t] == b'$') {
+                    let delim = &sql[i..=tag_end];
+                    let body_start = tag_end + 1;
+                    let end = sql[body_start..]
+                        .find(delim)
+                        .map(|n| body_start + n + delim.len())
+                        .unwrap_or(len);
+                    out.extend_from_slice(&bytes[i..end]);
+                    i = end;
+                } else {
+                    out.push(b'$');
+                    i += 1;
+                }
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+
+    // Only whole ASCII-delimited comment spans were removed; everything else
+    // was copied byte-for-byte, so the result is still valid UTF-8.
+    String::from_utf8(out).expect("comment stripping preserves UTF-8")
+}
+
 /// Checks whether `content` references `table` as a whole SQL identifier.
 ///
 /// Uses identifier boundaries (`[a-z0-9_]`) so a shorter name does not match
@@ -200,7 +287,7 @@ pub async fn run_up(
         }
 
         if !safe_mode_tables.is_empty() {
-            let content_lower = migration.up.content.to_lowercase();
+            let content_lower = strip_sql_comments(&migration.up.content).to_lowercase();
             let found_tables: Vec<&str> = safe_mode_tables
                 .iter()
                 .filter(|t| content_references_table(&content_lower, t.as_str()))
@@ -829,6 +916,89 @@ mod tests {
     fn test_content_references_table_empty_table() {
         let sql = "alter table users;".to_lowercase();
         assert!(!content_references_table(&sql, ""));
+    }
+
+    fn references_after_strip(sql: &str, table: &str) -> bool {
+        content_references_table(&strip_sql_comments(sql).to_lowercase(), table)
+    }
+
+    #[test]
+    fn test_strip_line_comment_hides_table_name() {
+        let sql = "alter table users add column foo int; -- touches devices_data later";
+        assert!(!references_after_strip(sql, "devices_data"));
+        assert!(references_after_strip(sql, "users"));
+    }
+
+    #[test]
+    fn test_strip_block_comment_hides_table_name() {
+        let sql = "/* cleanup for devices_data */ alter table users add column foo int;";
+        assert!(!references_after_strip(sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_strip_nested_block_comment() {
+        let sql = "/* outer /* devices_data */ still comment */ select 1;";
+        assert!(!references_after_strip(sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_real_reference_still_found_alongside_comment() {
+        let sql = "-- migrate devices_data\nalter table devices_data add column foo int;";
+        assert!(references_after_strip(sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_comment_replaced_by_space_keeps_boundaries() {
+        // The comment between the two words must not glue identifiers together.
+        let sql = "alter table devices_data/* comment */add column foo int;";
+        assert!(references_after_strip(sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_multiline_comment_naming_other_tables_does_not_trigger() {
+        // Real-world shape: the comment explains behavior in terms of other
+        // tables, but the statement only touches device_datas_exports.
+        let sql = "\
+-- Exports and alarm rules exclude simulated telemetry (device_datas/device_metrics
+-- rows with simulation_id set) unless the user explicitly opts in at request/rule
+-- creation. FALSE is the safe default: real reports and real alarms by default.
+ALTER TABLE device_datas_exports
+    ADD COLUMN include_simulated BOOLEAN NOT NULL DEFAULT FALSE;";
+        assert!(!references_after_strip(sql, "device_datas"));
+        assert!(!references_after_strip(sql, "device_metrics"));
+        assert!(references_after_strip(sql, "device_datas_exports"));
+    }
+
+    #[test]
+    fn test_comment_marker_inside_string_is_not_a_comment() {
+        // The `--` lives inside a literal; the statement after it is real SQL.
+        let sql = "insert into log (msg) values ('a -- b'); drop table devices_data;";
+        assert!(references_after_strip(sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_dollar_quoted_body_is_preserved() {
+        // Dynamic SQL in a DO block can genuinely touch the table.
+        let sql = "do $$ begin execute 'truncate devices_data'; end $$;";
+        assert!(references_after_strip(sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_comment_marker_inside_dollar_quote_is_not_a_comment() {
+        let sql = "do $fn$ select 1; -- not a comment terminator\n$fn$; drop table devices_data;";
+        assert!(references_after_strip(sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_quoted_identifier_still_matches() {
+        let sql = "alter table \"devices_data\" add column foo int;";
+        assert!(references_after_strip(sql, "devices_data"));
+    }
+
+    #[test]
+    fn test_unterminated_block_comment_swallows_rest() {
+        let sql = "select 1; /* drop table devices_data";
+        assert!(!references_after_strip(sql, "devices_data"));
     }
 
     #[tokio::test]
