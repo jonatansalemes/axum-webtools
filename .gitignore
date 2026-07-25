@@ -3,3 +3,4 @@ target
 migrations
 backup-*.sql
 *.dump
+.mcp.json
