@@ -10,6 +10,7 @@ General purpose tools for the axum web framework.
 |--------|-------|-------------|
 | [`tools`](tools/README.md) | [`axum-webtools`](https://crates.io/crates/axum-webtools) | Axum helpers: SQLx transactions (`with_tx`), JWT auth (`Claims`), consistent HTTP responses (`HttpError`, `ok`). |
 | [`pgsql-migrate`](pgsql-migrate/README.md) | [`axum-webtools-pgsql-migrate`](https://crates.io/crates/axum-webtools-pgsql-migrate) | PostgreSQL migration CLI: up/down/status, baseline, safe mode, backup & restore, split-statements, and more. |
+| [`clickhouse-migrate`](clickhouse-migrate/README.md) | [`axum-webtools-clickhouse-migrate`](https://crates.io/crates/axum-webtools-clickhouse-migrate) | ClickHouse migration CLI: up/down/status, baseline, redo/force for dirty migrations, safe mode, split-statements, and more. |
 | [`dlq-redrive`](dlq-redrive/README.md) | [`axum-webtools-dlq-redrive`](https://crates.io/crates/axum-webtools-dlq-redrive) | Kafka Dead Letter Queue redrive CLI: reprocess failed messages, route old messages to poison topics, inspect lag. |
 | `macros` | [`axum-webtools-macros`](https://crates.io/crates/axum-webtools-macros) | Procedural macros supporting the `axum-webtools` library (e.g. `#[endpoint]`). |
 
@@ -20,6 +21,7 @@ axum-webtools images are available on Docker Hub:
 - https://hub.docker.com/r/jslsolucoes/axum-webtools-pgsql-migrate-pg16
 - https://hub.docker.com/r/jslsolucoes/axum-webtools-pgsql-migrate-pg17
 - https://hub.docker.com/r/jslsolucoes/axum-webtools-pgsql-migrate-pg18
+- https://hub.docker.com/r/jslsolucoes/axum-webtools-clickhouse-migrate
 - https://hub.docker.com/r/jslsolucoes/axum-webtools-dlq-redrive
 
 ## Crates
@@ -27,6 +29,7 @@ axum-webtools images are available on Docker Hub:
 axum-webtools is a collection of crates that provide various tools and utilities for the axum web framework.
 
 - https://crates.io/crates/axum-webtools-pgsql-migrate
+- https://crates.io/crates/axum-webtools-clickhouse-migrate
 - https://crates.io/crates/axum-webtools-dlq-redrive
 - https://crates.io/crates/axum-webtools
 
@@ -52,6 +55,15 @@ pgsql-migrate up -d "postgres://user:pass@localhost/db"
 ```
 
 Full documentation: [`pgsql-migrate/README.md`](pgsql-migrate/README.md).
+
+### ClickHouse migrations (`clickhouse-migrate`)
+
+```bash
+cargo install axum-webtools-clickhouse-migrate
+clickhouse-migrate up -d "http://user:pass@localhost:8123/db"
+```
+
+Full documentation: [`clickhouse-migrate/README.md`](clickhouse-migrate/README.md).
 
 ### Kafka DLQ redrive (`dlq-redrive`)
 

@@ -30,10 +30,13 @@ jobs:
             needs_kafka: true
           - component: pgsql-migrate
             needs_db: true
+          - component: clickhouse-migrate
+            needs_clickhouse: true
     uses: ./.github/workflows/tests-component-rust.yml
     with:
       force: ${{ github.event.inputs.force || false }}
       component: ${{ matrix.component }}
       needs_kafka: ${{ matrix.needs_kafka || false }}
       needs_db: ${{ matrix.needs_db || false }}
+      needs_clickhouse: ${{ matrix.needs_clickhouse || false }}
 
