@@ -1,6 +1,6 @@
 .PHONY: setup-dev update-deps sync-deps test format lint pre-checks \
         publish-axum-webtools publish-axum-webtools-macros \
-        publish-axum-webtools-pgsql-migrate publish-axum-webtools-dlq-redrive \
+        publish-axum-webtools-pgsql-migrate publish-axum-webtools-clickhouse-migrate publish-axum-webtools-dlq-redrive \
         publish-all build build-release install-pgsql-migrate install-dlq-redrive
 
 help: ## [Helper] Show help
@@ -26,6 +26,9 @@ test-pgsql-migrate-e2e: ## [Dev] Run e2e tests for pgsql-migrate (inside contain
 
 test-pgsql-migrate-status-e2e: ## [Dev] Run e2e tests for pgsql-migrate (inside container)
 	@docker compose run --rm task sh -c 'cargo r --bin pgsql-migrate -- status --database $$DATABASE_URL -p pgsql-migrate/migrations'
+
+test-clickhouse-migrate: ## [Dev] Run tests for clickhouse-migrate package
+	@docker compose run --rm task sh -c 'cargo test --package axum-webtools-clickhouse-migrate --all-features'
 
 format: ## [Dev] Format code
 	@docker compose run --rm --no-deps task sh -c 'cargo fmt --all'

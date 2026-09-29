@@ -4,5 +4,6 @@ members = [
     "tools",
     "macros",
     "pgsql-migrate",
+    "clickhouse-migrate",
     "dlq-redrive",
 ]

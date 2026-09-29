@@ -1,0 +1,175 @@
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum SafeModeConfirm {
+    #[value(name = "ask")]
+    Ask,
+    #[value(name = "exit-with-error")]
+    ExitWithError,
+}
+
+#[derive(Parser)]
+#[command(name = "clickhouse-migrate")]
+#[command(about = "A simple ClickHouse migration tool", long_about = None)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    #[command(name = "up")]
+    Up {
+        #[arg(short = 'p', long = "path")]
+        path: Option<String>,
+
+        #[arg(short = 'd', long = "database")]
+        database: Option<String>,
+
+        #[arg(short = 'e', long = "env")]
+        env: Option<String>,
+
+        #[arg(
+            long = "safe-mode",
+            value_name = "TABLES",
+            help = "Comma-separated table names to watch for in pending migrations"
+        )]
+        safe_mode: Option<String>,
+
+        #[arg(
+            long = "safe-mode-confirm",
+            value_enum,
+            default_value = "ask",
+            help = "Action when unacknowledged safe-mode table found: ask (default) or exit-with-error"
+        )]
+        safe_mode_confirm: SafeModeConfirm,
+
+        #[arg(
+            long = "pre-execute",
+            help = "Comma-separated paths to SQL files to run before migrations"
+        )]
+        pre_execute: Option<String>,
+
+        #[arg(
+            long = "post-execute",
+            help = "Comma-separated paths to SQL files to run after migrations"
+        )]
+        post_execute: Option<String>,
+    },
+
+    #[command(name = "down")]
+    Down {
+        #[arg(short = 'p', long = "path")]
+        path: Option<String>,
+
+        #[arg(short = 'd', long = "database")]
+        database: Option<String>,
+
+        #[arg(short = 'e', long = "env")]
+        env: Option<String>,
+
+        #[arg(default_value = "1")]
+        count: u32,
+
+        #[arg(
+            long = "safe-mode-skip-auto-remove",
+            help = "Skip automatic removal of safe-mode.yml entries when rolling back"
+        )]
+        safe_mode_skip_auto_remove: bool,
+
+        #[arg(
+            long = "pre-execute",
+            help = "Comma-separated paths to SQL files to run before rollback"
+        )]
+        pre_execute: Option<String>,
+
+        #[arg(
+            long = "post-execute",
+            help = "Comma-separated paths to SQL files to run after rollback"
+        )]
+        post_execute: Option<String>,
+    },
+
+    #[command(name = "status")]
+    Status {
+        #[arg(short = 'p', long = "path")]
+        path: Option<String>,
+
+        #[arg(short = 'd', long = "database")]
+        database: Option<String>,
+
+        #[arg(short = 'e', long = "env")]
+        env: Option<String>,
+    },
+
+    #[command(name = "create")]
+    Create {
+        #[arg(short = 'd', long = "dir", default_value = "ch-migrations")]
+        dir: String,
+
+        #[arg(short = 's', long = "seq")]
+        name: String,
+    },
+
+    #[command(name = "baseline")]
+    Baseline {
+        #[arg(short = 'p', long = "path", default_value = "ch-migrations")]
+        path: String,
+
+        #[arg(short = 'd', long = "database")]
+        database: String,
+
+        #[arg(short = 'v', long = "version")]
+        version: u32,
+    },
+
+    #[command(name = "redo")]
+    Redo {
+        #[arg(short = 'p', long = "path", default_value = "ch-migrations")]
+        path: String,
+
+        #[arg(short = 'd', long = "database")]
+        database: String,
+
+        #[arg(short = 'e', long = "env", default_value = "prod")]
+        env: String,
+
+        #[arg(
+            long = "safe-mode",
+            value_name = "TABLES",
+            help = "Comma-separated table names to watch for in pending migrations"
+        )]
+        safe_mode: Option<String>,
+
+        #[arg(
+            long = "safe-mode-confirm",
+            value_enum,
+            default_value = "ask",
+            help = "Action when unacknowledged safe-mode table found: ask (default) or exit-with-error"
+        )]
+        safe_mode_confirm: SafeModeConfirm,
+
+        #[arg(
+            long = "pre-execute",
+            help = "Comma-separated paths to SQL files to run before redo"
+        )]
+        pre_execute: Option<String>,
+
+        #[arg(
+            long = "post-execute",
+            help = "Comma-separated paths to SQL files to run after redo"
+        )]
+        post_execute: Option<String>,
+    },
+    #[command(name = "force")]
+    Force {
+        #[arg(short = 'p', long = "path", default_value = "ch-migrations")]
+        path: String,
+
+        #[arg(short = 'd', long = "database")]
+        database: String,
+
+        #[arg(short = 'v', long = "version")]
+        version: u32,
+    },
+}

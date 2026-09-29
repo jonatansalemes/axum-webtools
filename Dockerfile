@@ -65,3 +65,20 @@ USER 65534:65534
 ENTRYPOINT ["pgsql-migrate"]
 CMD ["-h"]
 
+
+FROM base AS builder-clickhouse-migrate
+COPY ./clickhouse-migrate/Cargo.toml ./
+RUN mkdir src
+RUN echo "fn main() {}" > src/main.rs
+RUN cargo build --release
+RUN rm -rf ./src target/release/deps/clickhouse_migrate*
+COPY ./clickhouse-migrate/src ./src
+RUN cargo build --release
+
+FROM alpine:3.24 AS prod-clickhouse-migrate
+RUN apk add --no-cache ca-certificates \
+    && rm -rf /var/cache/apk/*
+COPY --from=builder-clickhouse-migrate --chown=65534:65534 /app/target/release/clickhouse-migrate /usr/local/bin/clickhouse-migrate
+USER 65534:65534
+ENTRYPOINT ["clickhouse-migrate"]
+CMD ["-h"]

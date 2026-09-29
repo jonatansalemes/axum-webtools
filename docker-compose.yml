@@ -13,12 +13,15 @@ x-template: &template
       condition: service_healthy
     pgsql-18:
       condition: service_healthy
+    clickhouse:
+      condition: service_healthy
   environment:
     ENV: dev
     RUST_LOG: INFO
     RUST_BACKTRACE: FULL
     KAFKA_BROKERS: kafka:9092
     DATABASE_URL: postgres://pgsqlmigrate:pgsqlmigrate@pgsql-18:5432/pgsqlmigrate
+    CLICKHOUSE_URL: http://clickhousemigrate:clickhousemigrate@clickhouse:8123/clickhousemigrate
   volumes:
     - ./:/app
     - cargo_registry:/usr/local/cargo/registry
@@ -66,6 +69,14 @@ services:
       dockerfile: ./Dockerfile
       target: prod-pgsql-migrate-pg16
     image: axum-webtools-prod-pgsql-migrate-pg16
+
+  prod-clickhouse-migrate:
+    <<: *template
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      target: prod-clickhouse-migrate
+    image: axum-webtools-prod-clickhouse-migrate
 
   pgsql-16:
     image: postgres:16-alpine
@@ -124,6 +135,25 @@ services:
     networks:
       - axum-webtools-network
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8-alpine
+    environment:
+      CLICKHOUSE_USER: clickhousemigrate
+      CLICKHOUSE_PASSWORD: clickhousemigrate
+      CLICKHOUSE_DB: clickhousemigrate
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ports:
+      - "8123:8123"
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://127.0.0.1:8123/ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - axum-webtools-network
 
   kafka:
     image: confluentinc/cp-kafka:8.3.1
@@ -167,6 +197,7 @@ volumes:
   cargo_git:
   cargo_target:
   db_data:
+  clickhouse_data:
 
 networks:
   axum-webtools-network:
