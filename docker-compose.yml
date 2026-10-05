@@ -136,7 +136,7 @@ services:
       - axum-webtools-network
 
   clickhouse:
-    image: clickhouse/clickhouse-server:25.8-alpine
+    image: clickhouse/clickhouse-server:26.6-alpine
     environment:
       CLICKHOUSE_USER: clickhousemigrate
       CLICKHOUSE_PASSWORD: clickhousemigrate
@@ -156,7 +156,7 @@ services:
       - axum-webtools-network
 
   kafka:
-    image: confluentinc/cp-kafka:8.3.1
+    image: confluentinc/cp-kafka:8.3.2
     environment:
       CLUSTER_ID: qv6BBXI9TKuOcPZWfd89as
       KAFKA_PROCESS_ROLES: broker,controller
