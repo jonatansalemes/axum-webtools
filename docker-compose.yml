@@ -79,7 +79,7 @@ services:
     image: axum-webtools-prod-clickhouse-migrate
 
   pgsql-16:
-    image: postgres:16-alpine
+    image: postgres:19-alpine
     environment:
       POSTGRES_USER: pgsqlmigrate
       POSTGRES_PASSWORD: pgsqlmigrate
@@ -98,7 +98,7 @@ services:
       - axum-webtools-network
 
   pgsql-17:
-    image: postgres:17-alpine
+    image: postgres:19-alpine
     environment:
       POSTGRES_USER: pgsqlmigrate
       POSTGRES_PASSWORD: pgsqlmigrate
@@ -117,7 +117,7 @@ services:
       - axum-webtools-network
 
   pgsql-18:
-    image: postgres:18-alpine
+    image: postgres:19-alpine
     environment:
       POSTGRES_USER: pgsqlmigrate
       POSTGRES_PASSWORD: pgsqlmigrate
@@ -136,7 +136,7 @@ services:
       - axum-webtools-network
 
   clickhouse:
-    image: clickhouse/clickhouse-server:25.8-alpine
+    image: clickhouse/clickhouse-server:26.7-alpine
     environment:
       CLICKHOUSE_USER: clickhousemigrate
       CLICKHOUSE_PASSWORD: clickhousemigrate
@@ -156,7 +156,7 @@ services:
       - axum-webtools-network
 
   kafka:
-    image: confluentinc/cp-kafka:8.3.1
+    image: confluentinc/cp-kafka:8.4.1
     environment:
       CLUSTER_ID: qv6BBXI9TKuOcPZWfd89as
       KAFKA_PROCESS_ROLES: broker,controller
